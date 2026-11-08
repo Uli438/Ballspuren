@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birdino Ballspur</title>
+<meta name="theme-color" content="#1D2A23">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Ballspur">
+<script src="mp4-muxer.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#ECF1EB; --surface:#FFFFFF; --ink:#1D2A23; --muted:#5A6B61; --line:#D2DBD3;
+  --tracer:#E2731A; --mark:#2E6AD6; --hit:#2C9650; --warn:#B23E16; --btn-ink:#F4F7F3;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#111814; --surface:#19221D; --ink:#E3EBE5; --muted:#97A89E; --line:#2B3731;
+    --tracer:#F2913A; --mark:#6F9DF2; --hit:#4FC277; --warn:#F07A4A; --btn-ink:#111814;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111814; --surface:#19221D; --ink:#E3EBE5; --muted:#97A89E; --line:#2B3731;
+  --tracer:#F2913A; --mark:#6F9DF2; --hit:#4FC277; --warn:#F07A4A; --btn-ink:#111814;
+  color-scheme:dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:17px/1.5 "Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:620px;margin:0 auto;padding:18px 16px 56px}
+.cond{font-family:"Barlow Condensed","Arial Narrow",system-ui,sans-serif}
+header{padding:6px 0 18px}
+header h1{font-family:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;font-weight:700;
+  font-size:2.6rem;line-height:.95;margin:0;letter-spacing:.005em}
+header svg{display:block;margin:10px 0 8px;width:100%;height:34px}
+header p{margin:0;color:var(--muted);max-width:34em}
+section{border-top:2px solid var(--line);padding:18px 0 22px}
+section h2{font-family:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;font-weight:700;
+  font-size:1.5rem;line-height:1.1;margin:0 0 6px;display:flex;gap:10px;align-items:baseline}
+section h2 .n{color:var(--tracer);font-variant-numeric:tabular-nums}
+.hint{color:var(--muted);font-size:.95rem;margin:0 0 12px}
+button,.filebtn{font:inherit;font-weight:600;border-radius:10px;border:2px solid var(--ink);
+  background:transparent;color:var(--ink);padding:10px 16px;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+button.primary,.filebtn{background:var(--ink);color:var(--btn-ink)}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,.filebtn:focus-within,input:focus-visible{outline:3px solid var(--mark);outline-offset:2px}
+.filebtn{display:inline-block}
+.filebtn input{position:absolute;opacity:0;width:1px;height:1px}
+.info{margin:10px 0 0;font-size:.95rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.frame{position:relative;background:#000;border-radius:8px;overflow:hidden;margin:4px 0 10px}
+.frame canvas{display:block;width:100%;height:auto;touch-action:manipulation}
+.frame .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#c9d3cc;font-size:.95rem;text-align:center;padding:20px}
+.scrub{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.scrub input[type=range]{flex:1 1 100%;accent-color:var(--tracer)}
+.scrub button{padding:8px 0;flex:1 1 0;min-width:52px}
+.scrub .lbl{flex:1 1 100%;font-variant-numeric:tabular-nums;color:var(--muted);font-size:.95rem}
+.ballrow{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.ballrow span{flex:1 1 auto;font-size:.95rem}
+.ballrow button{padding:6px 14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.92rem;color:var(--muted)}
+label.f input{font:inherit;font-size:1.05rem;color:var(--ink);background:var(--surface);
+  border:1.5px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;font-variant-numeric:tabular-nums}
+details{margin-top:14px}
+summary{cursor:pointer;color:var(--muted);font-size:.95rem}
+details .grid{margin-top:12px}
+.go{margin-top:18px;display:flex;flex-direction:column;gap:10px}
+.go button{padding:14px;font-size:1.1rem}
+.bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;display:none}
+.bar i{display:block;height:100%;width:0;background:var(--tracer);transition:width .15s linear}
+.status{font-size:.95rem;min-height:1.5em;color:var(--muted)}
+.status.err{color:var(--warn);font-weight:500}
+.board{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:var(--line);
+  border-radius:10px;overflow:hidden;margin:6px 0 14px}
+.board div{background:var(--surface);padding:12px 8px 10px;text-align:center}
+.board b{display:block;font-family:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;font-weight:700;
+  font-size:2.3rem;line-height:1;font-variant-numeric:tabular-nums}
+.board span{font-size:.85rem;color:var(--muted)}
+.board .sub{display:block;font-size:.8rem;color:var(--muted);margin-top:2px}
+#resImg{display:block;width:100%;border-radius:8px;background:#000}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.88rem;color:var(--muted);margin:8px 0 12px}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+pre{background:var(--surface);border:1.5px solid var(--line);border-radius:8px;padding:10px;
+  font-size:.78rem;line-height:1.4;overflow-x:auto;max-height:260px;margin:10px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){.bar i{transition:none}}
+summary.h2sum{font-family:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;font-weight:700;font-size:1.35rem;color:var(--ink);list-style:none;display:flex;align-items:center;gap:10px}
+summary.h2sum::-webkit-details-marker{display:none}
+summary.h2sum::after{content:"+";margin-left:auto;color:var(--tracer);font-size:1.6rem;line-height:1}
+details[open]>summary.h2sum::after{content:"–"}
+details>summary.h2sum+*{margin-top:12px}
+#tracerVid{display:block;width:100%;border-radius:8px;background:#000;margin-bottom:10px}
+.row{margin:4px 0 14px}
+#shots{display:flex;flex-direction:column;gap:8px}
+.shot{display:flex;gap:12px;align-items:center;text-align:left;font-weight:500;padding:8px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;width:100%}
+.shot img{width:64px;height:64px;object-fit:cover;border-radius:6px;background:#000;flex:none}
+.shot span{font-size:.92rem;line-height:1.35;font-variant-numeric:tabular-nums}
+.shot b{font-weight:600}
+dialog{border:none;border-radius:14px;padding:0;max-width:min(560px,94vw);width:100%;background:var(--bg);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+.dlg{padding:16px}
+.dlg video,.dlg img{display:block;width:100%;border-radius:8px;background:#000;margin:8px 0}
+.dlgT{font-family:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;font-weight:700;font-size:1.3rem;margin:0}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Birdino Ballspur</h1>
+  <svg viewBox="0 0 600 34" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M4 30 Q 300 -18 596 22" fill="none" stroke="var(--tracer)" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="4" cy="30" r="4" fill="var(--ink)"/>
+  </svg>
+  <p>Zeitlupe von hinten laden – die App findet den Ball, verfolgt den Flug und zeichnet die Flugbahn ein.</p>
+</header>
+
+<section>
+  <h2><span class="n">1</span>Schlag laden</h2>
+  <p class="hint">Zeitlupe (240 B/s) mit der Kamera-App aufnehmen: Kamera 1,5–3 m hinter dem Ball, tief, Bildmitte aufs Ziel. Dann hier auswählen – der Rest läuft automatisch.</p>
+  <label class="filebtn">Video auswählen<input id="file" type="file" accept="video/*"></label>
+  <p class="info" id="vinfo"></p>
+  <div class="go">
+    <div class="bar" id="bar"><i id="barfill"></i></div>
+    <div class="status" id="status"></div>
+  </div>
+</section>
+
+<section id="result" hidden>
+  <h2><span class="n">2</span>Ergebnis</h2>
+  <div class="board">
+    <div><b id="rDir">–</b><span>Startrichtung</span><span class="sub" id="rDirSub"></span></div>
+    <div><b id="rLaunch">–</b><span>Abschuss</span></div>
+    <div><b id="rSpeed">–</b><span>Ballspeed</span><span class="sub" id="rSpeedSub"></span></div>
+  </div>
+  <div class="board">
+    <div><b id="rCarry">–</b><span>Carry (m)</span><span class="sub" id="rCarrySub"></span></div>
+    <div><b id="rSide">–</b><span>Seitlich (m)</span><span class="sub" id="rSideSub"></span></div>
+    <div><b id="rApex">–</b><span>Scheitel (m)</span><span class="sub">Schätzung</span></div>
+  </div>
+  <video id="tracerVid" playsinline muted loop controls hidden></video>
+  <img id="tracerImg" alt="Ganze Flugbahn im Kamerabild" style="display:block;width:100%;border-radius:8px;background:#000;margin-bottom:10px">
+  <div class="row"><button id="shareVid" disabled>Video teilen / sichern</button><button id="shareImg">Bild teilen</button></div>
+  <canvas id="flugC" width="900" height="560" style="display:block;width:100%;border-radius:8px;margin-bottom:14px" aria-label="Flugbahn von oben und von der Seite"></canvas>
+  <details id="techDetails">
+    <summary class="h2sum">Details und Messpunkte</summary>
+    <p class="hint">Gemessene Ballpositionen in der Nahaufnahme:</p>
+    <img id="resImg" alt="Ballspur mit berechneter Flugbahn">
+  <div class="legend">
+    <span><i style="background:var(--hit)"></i>gefundener Ball</span>
+    <span><i style="background:var(--tracer)"></i>berechnete Bahn</span>
+    <span><i style="background:var(--mark)"></i>Startposition</span>
+  </div>
+    <pre id="details"></pre>
+    <div class="row"><button id="copy">Werte kopieren</button><button id="fix">Schläger erwischt? Korrigieren</button></div>
+  </details>
+</section>
+
+<section>
+  <details id="bildDetails">
+    <summary class="h2sum">Bild, Ball und Abschlagzone</summary>
+    <p class="hint">Findet die App den Ball nicht selbst: Bild wählen, auf den Ball tippen, „Ball verfolgen“. Liegen mehrere Bälle im Bild, einmal die Abschlagzone festlegen.</p>
+  <div class="frame">
+    <canvas id="view" width="9" height="16"></canvas>
+    <div class="empty" id="empty">Noch kein Video geladen</div>
+  </div>
+  <div class="scrub">
+    <input id="slider" type="range" min="0" max="0" value="0" step="1" aria-label="Bild wählen" disabled>
+    <button data-step="-10" disabled>−10</button>
+    <button data-step="-1" disabled>−1</button>
+    <button data-step="1" disabled>+1</button>
+    <button data-step="10" disabled>+10</button>
+    <span class="lbl" id="flabel">Bild –</span>
+  </div>
+  <div class="ballrow">
+    <span id="ballinfo">Ball: noch nicht markiert</span>
+    <button id="dminus" disabled aria-label="Kreis kleiner">−</button>
+    <button id="dplus" disabled aria-label="Kreis größer">+</button>
+    <button id="diag" disabled>Ball prüfen</button>
+  </div>
+  <div class="ballrow">
+    <span id="zoneinfo">Abschlagzone: keine (ganzes untere Bild)</span>
+    <button id="zoneset" disabled>Zone festlegen</button>
+    <button id="zonedel" disabled>Löschen</button>
+  </div>
+    <div class="go"><button class="primary" id="run" disabled>Ball verfolgen</button></div>
+  </details>
+</section>
+
+<section>
+  <details id="setDetails">
+    <summary class="h2sum">Einstellungen</summary>
+  <div class="grid">
+    <label class="f">Abstand Kamera → Ball (m, gemessen)<input id="abstand" inputmode="decimal" placeholder="leer = aus Ballgröße"></label>
+    <label class="f">Höhe Linse über Ballmitte (m)<input id="hoehe" inputmode="decimal" value="0,2"></label>
+    <label class="f">Ballspeed (km/h, optional)<input id="speed" inputmode="decimal" placeholder="vom Radar"></label>
+    <label class="f">Bildwinkel (°, nur ohne Abstand)<input id="hfov" inputmode="decimal" value="64"></label>
+  </div>
+  <details>
+    <summary>Bildrate und Erkennung</summary>
+    <p class="hint" style="margin-top:10px">Zeitlupe aus der Fotos-App: Datei 30, echt 240. Bei 120-B/s-Zeitlupe echt 120.</p>
+    <div class="grid">
+      <label class="f">Bildrate der Datei<input id="fpsDatei" inputmode="decimal" value="30"></label>
+      <label class="f">Echte Bildrate<input id="fpsReal" inputmode="decimal" value="240"></label>
+      <label class="f">Bewegungsschwelle (0–255)<input id="schwelle" inputmode="numeric" value="20"></label>
+      <label class="f">Max. Bilder nach Treffer<input id="maxb" inputmode="numeric" value="40"></label>
+    </div>
+  </details>
+  </details>
+</section>
+
+<section>
+  <h2><span class="n">3</span>Meine Schläge</h2>
+  <div id="shots"></div>
+  <p class="hint" id="shotsEmpty">Noch keine Schläge gespeichert.</p>
+</section>
+
+<dialog id="shotDlg">
+  <div class="dlg">
+    <p class="dlgT" id="dlgT"></p>
+    <video id="dlgVid" playsinline muted loop controls></video>
+    <img id="dlgImg" alt="Flugbahn des Schlags">
+    <p id="dlgW"></p>
+    <details><summary>Details</summary><pre id="dlgD"></pre></details>
+    <div class="row"><button id="dlgShare">Teilen</button><button id="dlgDel">Löschen</button><button class="primary" id="dlgClose">Schließen</button></div>
+  </div>
+</dialog>
+</main>
+
+<video id="video" playsinline muted preload="auto" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"></video>
+
+<script>
+// ===== CORE START (Erkennung + Geometrie, ohne DOM) =====
+const BALL_D = 0.04267, G = 9.81;
+
+function blurGray(rgba, w, h) {
+  const n = w * h, g = new Float32Array(n), t = new Float32Array(n), out = new Uint8ClampedArray(n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) g[i] = 0.299 * rgba[j] + 0.587 * rgba[j + 1] + 0.114 * rgba[j + 2];
+  const k = [1, 4, 6, 4, 1];
+  for (let y = 0; y < h; y++) {
+    const r = y * w;
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let d = -2; d <= 2; d++) { let xx = x + d; if (xx < 0) xx = 0; else if (xx >= w) xx = w - 1; s += k[d + 2] * g[r + xx]; }
+      t[r + x] = s / 16;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let d = -2; d <= 2; d++) { let yy = y + d; if (yy < 0) yy = 0; else if (yy >= h) yy = h - 1; s += k[d + 2] * t[yy * w + x]; }
+      out[y * w + x] = s / 16;
+    }
+  }
+  return out;
+}
+
+function openMask(m, w, h) {
+  const e = new Uint8Array(w * h), o = new Uint8Array(w * h);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    if (m[i] && m[i - 1] && m[i + 1] && m[i - w] && m[i + w] && m[i - w - 1] && m[i - w + 1] && m[i + w - 1] && m[i + w + 1]) e[i] = 1;
+  }
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    if (e[i]) { o[i] = o[i - 1] = o[i + 1] = o[i - w] = o[i + w] = o[i - w - 1] = o[i - w + 1] = o[i + w - 1] = o[i + w + 1] = 1; }
+  }
+  return o;
+}
+
+// Zusammenhaengende Flecken; Radius nur fuer Flecken in plausibler Groesse
+function components(m, w, h, minA, maxA) {
+  const lab = new Int32Array(w * h), stack = new Int32Array(w * h), res = [];
+  let pix = [];
+  for (let s = 0; s < w * h; s++) {
+    if (!m[s] || lab[s]) continue;
+    let sp = 0, a = 0, sx = 0, sy = 0; pix.length = 0;
+    stack[sp++] = s; lab[s] = 1;
+    while (sp) {
+      const p = stack[--sp], x = p % w, y = (p / w) | 0;
+      a++; sx += x; sy += y; pix.push(p);
+      if (x > 0 && m[p - 1] && !lab[p - 1]) { lab[p - 1] = 1; stack[sp++] = p - 1; }
+      if (x < w - 1 && m[p + 1] && !lab[p + 1]) { lab[p + 1] = 1; stack[sp++] = p + 1; }
+      if (y > 0 && m[p - w] && !lab[p - w]) { lab[p - w] = 1; stack[sp++] = p - w; }
+      if (y < h - 1 && m[p + w] && !lab[p + w]) { lab[p + w] = 1; stack[sp++] = p + w; }
+    }
+    if (a < minA || a > maxA) continue;
+    const cx = sx / a, cy = sy / a;
+    let r2 = 0;
+    for (const p of pix) { const dx = p % w - cx, dy = ((p / w) | 0) - cy, q = dx * dx + dy * dy; if (q > r2) r2 = q; }
+    res.push({ a, x: cx, y: cy, r: Math.sqrt(r2) + 0.5, pix: pix.slice() });
+  }
+  return res;
+}
+
+// grab(n) -> Promise<{img:{data,width,height}, g:Uint8ClampedArray}> fuer den Ausschnitt (x0,y0)
+async function analyse(o) {
+  const { grab, nFrames, start, ball, crop, T, maxB, onProgress } = o;
+  const { x0, y0, cw, ch } = crop;
+  const cx0 = ball.x, cy0 = ball.y, d0 = ball.d;
+  const sfr = await grab(start), ref = sfr.g;
+  const lum = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  // Helligkeit des ruhenden Balls: der Schlaegerkopf ist fast immer dunkler
+  let ballMax0 = 0;
+  { const rr = Math.max(1, d0 / 3);
+    for (let y = Math.round(cy0 - rr); y <= Math.round(cy0 + rr); y++) for (let x = Math.round(cx0 - rr); x <= Math.round(cx0 + rr); x++) {
+      const xx = x - x0, yy = y - y0; if (xx < 0 || yy < 0 || xx >= cw || yy >= ch) continue;
+      const L = lum(sfr.img.data, (yy * cw + xx) * 4); if (L > ballMax0) ballMax0 = L; } }
+  const hell = o.hell == null ? 0.7 : o.hell;
+  const rw = Math.max(2, Math.round(d0)), rx0 = Math.round(cx0 - rw / 2) - x0, ry0 = Math.round(cy0 - rw / 2) - y0;
+  // Treffmoment-Suche nur im kleinen Ballbereich (schnell); grabRoi liefert rw*rw Grauwerte
+  const roiOf = g => { const r = new Float32Array(rw * rw); for (let y = 0; y < rw; y++) for (let x = 0; x < rw; x++) r[y * rw + x] = g[(y + ry0) * cw + (x + rx0)]; return r; };
+  const small = o.grabRoi ? n => o.grabRoi(n, Math.round(cx0 - rw / 2), Math.round(cy0 - rw / 2), rw) : async n => roiOf((await grab(n)).g);
+  const refR = await small(start);
+  let i = start, diffs = [], treff = o.seed ? o.treff : null;
+  const maxSearch = o.seed ? i : Math.min(nFrames - 1, start + 900);
+  while (i < maxSearch) {
+    i++;
+    const r = await small(i);
+    let s = 0; for (let k = 0; k < r.length; k++) s += Math.abs(r[k] - refR[k]);
+    const d = s / r.length; diffs.push(d);
+    onProgress && onProgress('treff', i - start, maxSearch - start);
+    if (diffs.length > 5) {
+      const b = diffs.slice(0, 5), mean = b.reduce((p, q) => p + q, 0) / 5;
+      const std = Math.sqrt(b.reduce((p, q) => p + (q - mean) ** 2, 0) / 5);
+      if (d > Math.max(12, mean + 6 * std + 3)) { treff = i; break; }
+    }
+  }
+  if (treff === null) return { error: 'treff' };
+  const base = (await grab(Math.max(start, treff - 3))).img;
+  const i0 = o.seed ? o.seed.f : treff;
+  let fr = await grab(i0), prev = fr.g;
+  i = i0;
+  const mkPatch = (x, y, d, img) => {
+    const pr = Math.max(3, Math.ceil(d * 0.7)), px = Math.round(x - x0), py = Math.round(y - y0);
+    const sz = 2 * pr + 1, data = new Uint8ClampedArray(sz * sz * 4);
+    for (let yy = -pr; yy <= pr; yy++) for (let xx = -pr; xx <= pr; xx++) {
+      const sx = px + xx, sy = py + yy; if (sx < 0 || sy < 0 || sx >= cw || sy >= ch) continue;
+      const si = (sy * cw + sx) * 4, di = ((yy + pr) * sz + (xx + pr)) * 4;
+      data[di] = img.data[si]; data[di + 1] = img.data[si + 1]; data[di + 2] = img.data[si + 2]; data[di + 3] = 255;
+    }
+    return { px, py, pr, sz, data };
+  };
+  // 1) In jedem Bild nach dem Treffer alle ballaehnlichen Flecken sammeln
+  const frames = [];
+  if (o.seed) frames.push({ f: i0, cands: [{ x: o.seed.x, y: o.seed.y, d: Math.min(d0, Math.max(3, o.seed.d)), rund: 1, patch: mkPatch(o.seed.x, o.seed.y, o.seed.d, fr.img) }] });
+  const dmax = 1.15 * d0 + 2;
+  for (let k = 0; k < maxB && i < nFrames - 1; k++) {
+    i++; fr = await grab(i); const g = fr.g;
+    onProgress && onProgress('spur', k + 1, maxB);
+    const n = cw * ch, m = new Uint8Array(n);
+    for (let p = 0; p < n; p++) if (Math.abs(g[p] - ref[p]) > T && Math.abs(g[p] - prev[p]) > T) m[p] = 1;
+    prev = g;
+    const cands = [];
+    for (const c of components(openMask(m, cw, ch), cw, ch, 4, 3 * d0 * d0)) {
+      if (2 * c.r > dmax) continue;
+      const x = c.x + x0, y = c.y + y0;
+      if (Math.hypot(x - cx0, y - cy0) < 0.8 * d0 || y > cy0 + d0) continue;
+      const rund = c.a / (Math.PI * c.r * c.r + 1e-6);
+      if (rund < 0.25) continue;
+      let mx = 0; for (const q of c.pix) { const L = lum(fr.img.data, q * 4); if (L > mx) mx = L; }
+      // Helligkeit nur in den ersten Bildern pruefen, solange der Schlaeger in der Naehe ist.
+      // Spaeter kann der Ball vor hellem Himmel dunkler wirken als der Hintergrund.
+      if (k < 8 && mx < hell * ballMax0) continue;
+      cands.push({ x, y, d: 2 * c.r, rund, bright: mx >= hell * ballMax0, patch: mkPatch(x, y, 2 * c.r, fr.img) });
+    }
+    cands.sort((p, q) => q.rund - p.rund); if (cands.length > 40) cands.length = 40;
+    frames.push({ f: i, cands });
+  }
+  // 2) Von einem Startfleck aus verfolgen; der Ball fliegt lange und gleichmaessig,
+  //    der Schlaeger verschwindet nach wenigen Bildern seitlich
+  const follow = (k0, c0) => {
+    const tr = [{ f: frames[k0].f, ...c0 }], nf = Math.max(1, frames[k0].f - treff);
+    let last = c0, dl = c0.d, vel = [(c0.x - cx0) / nf, (c0.y - cy0) / nf], miss = 0, err = 0;
+    for (let k = k0 + 1; k < frames.length; k++) {
+      const q = miss + 1, pred = [last.x + vel[0] * q, last.y + vel[1] * q];
+      const rad = Math.max(3 * dl, 0.5 * Math.hypot(vel[0], vel[1]) + 2 * dl) * q;
+      let best = null;
+      for (const c of frames[k].cands) {
+        if (c.d > 1.15 * dl + 2 || c.d < 0.55 * dl - 1) continue;
+        const dist = Math.hypot(c.x - pred[0], c.y - pred[1]);
+        if (dist > rad) continue;
+        const sc = dist / rad + (1 - c.rund);
+        if (!best || sc < best.sc) best = { c, sc, dist };
+      }
+      if (best) {
+        const c = best.c; vel = [(c.x - last.x) / q, (c.y - last.y) / q];
+        last = c; dl = Math.max(3, c.d); miss = 0; err += best.dist / dl;
+        tr.push({ f: frames[k].f, ...c });
+      } else { miss++; if (miss >= 4) break; }
+    }
+    // Gerade? Ein Ball fliegt im Bild anfangs fast geradlinig, der Schlaegerkopf auf einem Bogen.
+    let bend = 0;
+    const m = Math.min(12, tr.length);
+    if (m >= 4) {
+      const p0 = tr[0], p1 = tr[m - 1], L = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+      for (let k = 1; k < m - 1; k++) bend = Math.max(bend, Math.abs((p1.x - p0.x) * (p0.y - tr[k].y) - (p0.x - tr[k].x) * (p1.y - p0.y)) / L);
+    }
+    const krumm = bend > Math.max(3, 0.12 * d0);
+    return { tr, err: err / tr.length, wert: krumm ? tr.length / 2 : tr.length };
+  };
+  let bestT = null;
+  const kMax = o.seed ? 1 : Math.min(frames.length, 16);
+  for (let k = 0; k < kMax; k++) for (const c of frames[k].cands) {
+    // Startfleck muss hell sein wie der ruhende Ball: kurz nach dem Treffer ist der Ball noch
+    // vor Boden/Matte und wirkt hell, der Schlaegerkopf dagegen dunkel
+    if (!o.seed && !c.bright) continue;
+    const r = follow(k, c);
+    if (!bestT || r.wert > bestT.wert || (r.wert === bestT.wert && r.err < bestT.err)) bestT = r;
+  }
+  // 3) Spur verlaengern: Feinsuche dort, wo der Ball laut berechneter Bahn sein muss.
+  //    Ungeglaettetes Bild, Vergleich mit dem Startbild, auch 1-2 Pixel kleine Baelle (heller oder dunkler).
+  if (bestT && bestT.tr.length >= 6) {
+    const tr = bestT.tr;
+    const refRaw = new Float32Array(cw * ch);
+    for (let k = 0, j = 0; k < cw * ch; k++, j += 4) refRaw[k] = lum(sfr.img.data, j);
+    const winRaw = async (n, wx, wy, ws) => {
+      if (o.grabRaw) return await o.grabRaw(n, wx, wy, ws);
+      const im = (await grab(n)).img.data, r = new Float32Array(ws * ws);
+      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) r[y * ws + x] = lum(im, ((y + wy - y0) * cw + (x + wx - x0)) * 4);
+      return r;
+    };
+    const a = tr[tr.length - 1], b = tr[Math.max(0, tr.length - 4)];
+    let vel = [(a.x - b.x) / Math.max(1, a.f - b.f), (a.y - b.y) / Math.max(1, a.f - b.f)];
+    let last = a, dl = a.d, fN = a.f, miss = 0, pred = null, sinceFit = 99;
+    const maxF = Math.min(nFrames - 1, a.f + (o.maxExt || 300));
+    while (fN < maxF && miss < 10) {
+      fN++;
+      if (o.makePredictor && sinceFit >= 8) { pred = o.makePredictor(tr.map(p => ({ f: p.f, x: p.x, y: p.y, d: p.d })), treff) || pred; sinceFit = 0; }
+      const q = fN - last.f, mp = pred ? pred(fN) : null;
+      const px = mp ? mp[0] : last.x + vel[0] * q, py = mp ? mp[1] : last.y + vel[1] * q;
+      if (px < x0 + 4 || px >= x0 + cw - 4 || py < y0 + 4 || py >= y0 + ch - 4) break;
+      const rr = Math.max(5, 1.5 * dl + 2 * miss + (mp ? 0 : 0.5 * Math.hypot(vel[0], vel[1])));
+      const ws = Math.min(160, Math.round(2 * rr + 10));
+      const wx = Math.max(x0, Math.min(x0 + cw - ws, Math.round(px - ws / 2))), wy = Math.max(y0, Math.min(y0 + ch - ws, Math.round(py - ws / 2)));
+      const r = await winRaw(fN, wx, wy, ws), dif = new Float32Array(ws * ws);
+      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) dif[y * ws + x] = Math.abs(r[y * ws + x] - refRaw[(y + wy - y0) * cw + (x + wx - x0)]);
+      const srt = Array.from(dif).sort((u, v) => u - v), med = srt[srt.length >> 1], noise = Math.max(2, 1.48 * med);
+      let pk = -1, pv = 0;
+      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) {
+        const v = dif[y * ws + x]; if (v <= pv) continue;
+        if (Math.hypot(x + wx - px, y + wy - py) <= rr) { pv = v; pk = y * ws + x; }
+      }
+      let best = null;
+      if (pk >= 0 && pv > Math.max(6, med + 5 * noise)) {
+        const th = Math.max(med + 2 * noise, 0.4 * pv), seen = new Uint8Array(ws * ws), st = [pk]; seen[pk] = 1;
+        let sw = 0, sx = 0, sy = 0, n = 0;
+        while (st.length && n < 4 * dl * dl + 30) {
+          const p = st.pop(), x = p % ws, y = (p / ws) | 0, w = dif[p] - med; n++; sw += w; sx += w * x; sy += w * y;
+          for (const qq of [p - 1, p + 1, p - ws, p + ws]) {
+            if (qq < 0 || qq >= ws * ws || seen[qq]) continue;
+            if ((qq === p - 1 && x === 0) || (qq === p + 1 && x === ws - 1)) continue;
+            if (dif[qq] >= th) { seen[qq] = 1; st.push(qq); }
+          }
+        }
+        const d = Math.max(1.5, 2 * Math.sqrt(n / Math.PI));
+        if (sw > 0 && d <= 1.4 * dl + 3) best = { x: wx + sx / sw, y: wy + sy / sw, d };
+      }
+      onProgress && onProgress('ext', fN - a.f, maxF - a.f);
+      if (best && q === 1 && best.x === last.x && best.y === last.y && best.d === last.d) {
+        // exakt dasselbe Bild wie zuvor (doppeltes Bild im umgewandelten Video): ueberspringen
+      } else if (best) {
+        const nv = [(best.x - last.x) / q, (best.y - last.y) / q];
+        vel = [0.6 * vel[0] + 0.4 * nv[0], 0.6 * vel[1] + 0.4 * nv[1]];
+        last = { f: fN, x: best.x, y: best.y, d: best.d }; dl = Math.max(1.5, 0.7 * dl + 0.3 * best.d); miss = 0; sinceFit++;
+        tr.push({ ...last, patch: null });
+      } else miss++;
+    }
+    // 4) Rueckwaerts: Bilder zwischen Treffer und erstem Fund nachtraeglich absuchen.
+    //    Dort ist der Ball am groessten, aber oft verwischt und dicht am Schlaeger.
+    const fein = async (fN, px, py, rr, dl, dmax) => {
+      const ws = Math.min(200, Math.round(2 * rr + 10));
+      const wx = Math.max(x0, Math.min(x0 + cw - ws, Math.round(px - ws / 2))), wy = Math.max(y0, Math.min(y0 + ch - ws, Math.round(py - ws / 2)));
+      const r = await winRaw(fN, wx, wy, ws), dif = new Float32Array(ws * ws);
+      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) dif[y * ws + x] = Math.abs(r[y * ws + x] - refRaw[(y + wy - y0) * cw + (x + wx - x0)]);
+      const srt = Array.from(dif).sort((u, v) => u - v), med = srt[srt.length >> 1], noise = Math.max(2, 1.48 * med);
+      let pk = -1, pv = 0;
+      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) {
+        const v = dif[y * ws + x]; if (v <= pv) continue;
+        if (Math.hypot(x + wx - px, y + wy - py) <= rr && Math.hypot(x + wx - cx0, y + wy - cy0) > 0.7 * d0) { pv = v; pk = y * ws + x; }
+      }
+      if (pk < 0 || pv <= Math.max(10, med + 5 * noise)) return null;
+      const th = Math.max(med + 2 * noise, 0.4 * pv), seen = new Uint8Array(ws * ws), st = [pk]; seen[pk] = 1;
+      let sw = 0, sx = 0, sy = 0, n = 0;
+      while (st.length && n < 6 * dl * dl + 40) {
+        const p = st.pop(), x = p % ws, y = (p / ws) | 0, w = dif[p] - med; n++; sw += w; sx += w * x; sy += w * y;
+        for (const qq of [p - 1, p + 1, p - ws, p + ws]) {
+          if (qq < 0 || qq >= ws * ws || seen[qq]) continue;
+          if ((qq === p - 1 && x === 0) || (qq === p + 1 && x === ws - 1)) continue;
+          if (dif[qq] >= th) { seen[qq] = 1; st.push(qq); }
+        }
+      }
+      const d = Math.max(1.5, 2 * Math.sqrt(n / Math.PI));
+      if (sw <= 0 || d > dmax) return null;
+      return { x: wx + sx / sw, y: wy + sy / sw, d };
+    };
+    // Rueckwaerts im Korridor zwischen Ruhestelle und erstem Fund suchen: der Ball liegt dort auf
+    // (fast) einer Geraden; sein Tempo im Bild ist nah an der Kamera aber viel hoeher als spaeter.
+    tr.sort((p, q) => p.f - q.f);
+    let first = tr[0], missB = 0;
+    for (let fB = first.f - 1; fB > treff && missB < 3; fB--) {
+      const ux = first.x - cx0, uy = first.y - cy0, L = Math.hypot(ux, uy);
+      if (L < 1.2 * d0) break;
+      const ex = ux / L, ey = uy / L, breite = 0.6 * Math.max(first.d, d0) + 4 + 2 * missB;
+      const bx0 = Math.max(x0, Math.floor(Math.min(cx0, first.x) - breite)), bx1 = Math.min(x0 + cw, Math.ceil(Math.max(cx0, first.x) + breite));
+      const by0 = Math.max(y0, Math.floor(Math.min(cy0, first.y) - breite)), by1 = Math.min(y0 + ch, Math.ceil(Math.max(cy0, first.y) + breite));
+      const ws = Math.max(bx1 - bx0, by1 - by0); if (ws < 8 || ws > 900) break;
+      const wx = Math.max(x0, Math.min(x0 + cw - ws, bx0)), wy = Math.max(y0, Math.min(y0 + ch - ws, by0));
+      const r = await winRaw(fB, wx, wy, ws), dif = new Float32Array(ws * ws), inK = new Uint8Array(ws * ws);
+      let pk = -1, pv = 0; const vals = [];
+      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) {
+        const gx = x + wx, gy = y + wy, i = y * ws + x;
+        const s_ = (gx - cx0) * ex + (gy - cy0) * ey, perp = Math.abs(-(gx - cx0) * ey + (gy - cy0) * ex);
+        if (s_ < 0.7 * d0 || s_ > L - 0.3 * first.d || perp > breite) continue;   // nur im Korridor, nicht auf der Ruhestelle
+        inK[i] = 1;
+        const v = Math.abs(r[i] - refRaw[(gy - y0) * cw + (gx - x0)]); dif[i] = v; vals.push(v);
+        if (v > pv) { pv = v; pk = i; }
+      }
+      onProgress && onProgress('ext', -(first.f - fB), 0);
+      let best = null;
+      if (pk >= 0 && vals.length > 20) {
+        vals.sort((u, v) => u - v);
+        const med = vals[vals.length >> 1], noise = Math.max(2, 1.48 * med);
+        if (pv > Math.max(15, med + 5 * noise)) {
+          const th = Math.max(med + 2 * noise, 0.4 * pv), seen = new Uint8Array(ws * ws), st = [pk]; seen[pk] = 1;
+          let sw = 0, sx = 0, sy = 0, n = 0;
+          while (st.length && n < 6 * d0 * d0 + 40) {
+            const p = st.pop(), x = p % ws, y = (p / ws) | 0, w = dif[p] - med; n++; sw += w; sx += w * x; sy += w * y;
+            for (const qq of [p - 1, p + 1, p - ws, p + ws]) {
+              if (qq < 0 || qq >= ws * ws || seen[qq] || !inK[qq]) continue;
+              if ((qq === p - 1 && x === 0) || (qq === p + 1 && x === ws - 1)) continue;
+              if (dif[qq] >= th) { seen[qq] = 1; st.push(qq); }
+            }
+          }
+          const d = Math.max(1.5, 2 * Math.sqrt(n / Math.PI));
+          if (sw > 0 && d <= 1.8 * Math.max(first.d, d0) + 4) best = { x: wx + sx / sw, y: wy + sy / sw, d };
+        }
+      }
+      if (best) { tr.unshift({ f: fB, x: best.x, y: best.y, d: best.d, patch: null }); first = tr[0]; missB = 0; }
+      else missB++;
+    }
+  }
+  const track = bestT ? bestT.tr.map(p => ({ f: p.f, x: p.x, y: p.y, d: p.d })) : [];
+  const patches = bestT ? bestT.tr.map(p => p.patch).filter(Boolean) : [];
+  return { treff, track, base, patches };
+}
+
+function projiziere(P, f, cx, cy, al) {
+  const ca = Math.cos(al), sa = Math.sin(al);
+  return P.map(([X, Y, Z]) => { const Yc = Y * ca - Z * sa, Zc = Y * sa + Z * ca; return [cx + f * X / Zc, cy - f * Yc / Zc, Zc]; });
+}
+
+function kameraLage(start, f, cx, cy, abstand, hoehe) {
+  const gamma = Math.atan((start[1] - cy) / f);
+  const al = gamma - Math.atan(hoehe / abstand);
+  const rx = (start[0] - cx) / f, ry = -(start[1] - cy) / f;
+  const yl = ry * Math.cos(al) + Math.sin(al), zl = -ry * Math.sin(al) + Math.cos(al);
+  const s = abstand / zl;
+  return { al, B: [rx * s, yl * s, abstand] };
+}
+
+const KD = 0.0047; // Luftwiderstand Golfball (1/m)
+function bahn(p, t, B, vFest) {
+  let th, ph, v, t0; const aL = p.length > 3 ? p[3] : 0, aV = p.length > 4 ? p[4] : 0;
+  if (vFest == null) { [th, ph, v] = p; t0 = 0; } else { [th, ph, t0] = p; v = vFest; }
+  const u = [Math.cos(th) * Math.sin(ph), Math.sin(th), Math.cos(th) * Math.cos(ph)], nr = [Math.cos(ph), 0, -Math.sin(ph)];
+  return t.map(tt0 => { const tt = tt0 + t0, q = 0.5 * aL * tt * tt, sv = v * tt - 0.5 * KD * v * v * tt * tt;
+    return [B[0] + sv * u[0] + q * nr[0], B[1] + sv * u[1] + 0.5 * (aV - G) * tt * tt, B[2] + sv * u[2] + q * nr[2]]; });
+}
+
+// Ganzer Flug mit Luftwiderstand, Auftrieb (Backspin) und Seitenkurve; Koordinaten relativ zum Ball
+function flug(th, ph, v0, aL0, aV0) {
+  // Auftrieb aus der gemessenen Anfangs-Aufwaertsbeschleunigung, sonst typischer Eisen-Spin
+  const kd = KD, kl = aV0 == null ? 0.0034 : Math.min(0.008, Math.max(0, aV0 / (v0 * v0))), dt = 0.005;
+  let p = [0, 0, 0], v = [v0 * Math.cos(th) * Math.sin(ph), v0 * Math.sin(th), v0 * Math.cos(th) * Math.cos(ph)], apex = 0, t = 0;
+  const pts = [[0, 0, 0]];
+  while (t < 15) {
+    const sp = Math.hypot(v[0], v[1], v[2]), vh = Math.hypot(v[0], v[2]) || 1e-9;
+    const L = [-v[1] * v[0] / vh / sp, vh / sp, -v[1] * v[2] / vh / sp], S = [v[2] / vh, 0, -v[0] / vh], as = aL0 * (sp / v0) ** 2;
+    const a = [-kd * sp * v[0] + kl * sp * sp * L[0] + as * S[0], -kd * sp * v[1] + kl * sp * sp * L[1] - G, -kd * sp * v[2] + kl * sp * sp * L[2] + as * S[2]];
+    const np = [p[0] + v[0] * dt, p[1] + v[1] * dt, p[2] + v[2] * dt];
+    v = [v[0] + a[0] * dt, v[1] + a[1] * dt, v[2] + a[2] * dt]; t += dt;
+    if (np[1] < 0 && t > 0.05) { const fr = p[1] / (p[1] - np[1]); p = [p[0] + (np[0] - p[0]) * fr, 0, p[2] + (np[2] - p[2]) * fr]; pts.push(p); break; }
+    p = np; if (p[1] > apex) apex = p[1]; pts.push(p);
+  }
+  return { pts, carry: p[2], side: p[0], apex, zeit: t };
+}
+
+function solve(A, b) {
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    if (Math.abs(M[c][c]) < 1e-300) return null;
+    for (let r = 0; r < n; r++) if (r !== c) { const fct = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= fct * M[c][k]; }
+  }
+  return M.map((r, i) => r[n] / r[i]);
+}
+
+// Levenberg-Marquardt mit soft_l1-Verlust (wie scipy least_squares, f_scale=2)
+function lm(res, x0, lo, hi) {
+  const fs = 2, clamp = x => x.map((v, j) => Math.min(hi[j], Math.max(lo[j], v)));
+  const cost = r => { let c = 0; for (const v of r) c += 2 * (Math.sqrt(1 + (v / fs) ** 2) - 1); return c; };
+  let x = clamp(x0), r = res(x), c = cost(r), lam = 1e-3;
+  const n = x.length;
+  for (let it = 0; it < 300; it++) {
+    const w = r.map(v => 1 / Math.sqrt(1 + (v / fs) ** 2));
+    const J = [];
+    for (let j = 0; j < n; j++) {
+      const h = 1e-6 * Math.max(1, Math.abs(x[j])), xp = x.slice(); xp[j] += h;
+      const rp = res(xp); J.push(rp.map((v, k) => (v - r[k]) / h));
+    }
+    const A = [...Array(n)].map(() => Array(n).fill(0)), gr = Array(n).fill(0);
+    for (let k = 0; k < r.length; k++) for (let a = 0; a < n; a++) {
+      gr[a] += w[k] * J[a][k] * r[k];
+      for (let b = 0; b < n; b++) A[a][b] += w[k] * J[a][k] * J[b][k];
+    }
+    let ok = false;
+    for (let tries = 0; tries < 12; tries++) {
+      const M = A.map((row, a) => row.map((v, b) => a === b ? v * (1 + lam) + 1e-12 : v));
+      const dx = solve(M, gr.map(v => -v));
+      if (!dx) { lam *= 4; continue; }
+      const xn = clamp(x.map((v, j) => v + dx[j])), rn = res(xn), cn = cost(rn);
+      if (cn < c) { const rel = (c - cn) / Math.max(c, 1e-12); x = xn; r = rn; c = cn; lam = Math.max(lam / 3, 1e-10); ok = true; if (rel < 1e-12) return { x, c, r }; break; }
+      lam *= 4;
+    }
+    if (!ok) break;
+  }
+  return { x, c, r };
+}
+
+function anpassen(track, treff, fps, f, cx, cy, al, B, vFest) {
+  const t = track.map(p => (p.f - treff + 0.5) / fps);
+  const obs = track.map(p => [p.x, p.y]);
+  // Ballgroesse als zusaetzliche Messung der Entfernung: d = f * 42,67 mm / Tiefe.
+  // Kleine Baelle sind ungenau und zaehlen weniger, unter 6 px gar nicht.
+  // Bewegungsunschaerfe macht schnelle Baelle im Bild groesser: je schneller, desto weniger Gewicht.
+  const vimg = track.map((p, k) => { const a = track[Math.max(0, k - 1)], b = track[Math.min(track.length - 1, k + 1)];
+    return Math.hypot(b.x - a.x, b.y - a.y) / Math.max(1, b.f - a.f); });
+  const sw = track.map((p, k) => (p.d >= 10 ? 1 : p.d >= 6 ? 0.5 : 0) / (1 + vimg[k] / Math.max(p.d, 1)));
+  // Gemessene Durchmesser haben je nach Kontrast einen festen Fehler (Rand, Unschaerfe):
+  // ein gemeinsamer Groessenfaktor wird mitgeschaetzt, die Groessen-AENDERUNG traegt die Information.
+  const sizeScale = pr => { let a = 0, b = 0;
+    pr.forEach((q, k) => { if (!sw[k]) return; const dp = f * BALL_D / q[2]; a += sw[k] * sw[k] * track[k].d * dp; b += sw[k] * sw[k] * dp * dp; });
+    return b ? Math.min(1.5, Math.max(0.7, a / b)) : 1; };
+  const res = p => { const pr = projiziere(bahn(p, t, B, vFest), f, cx, cy, al), o = [], sc = sizeScale(pr);
+    pr.forEach((q, k) => { o.push(q[0] - obs[k][0], q[1] - obs[k][1]); if (sw[k]) o.push(sw[k] * (sc * f * BALL_D / q[2] - track[k].d)); });
+    return o; };
+  const rad = Math.PI / 180;
+  let lo, hi, x0;
+  if (vFest == null) { lo = [-10 * rad, -30 * rad, 10]; hi = [60 * rad, 30 * rad, 90]; x0 = [15 * rad, 0, 50]; }
+  else { lo = [-10 * rad, -30 * rad, -1.5 / fps]; hi = [60 * rad, 30 * rad, 1.5 / fps]; x0 = [15 * rad, 0, 0]; }
+  // Ab 12 Punkten zusaetzlich die Seitenbeschleunigung (Kurve) schaetzen
+  if (track.length >= 12) { lo.push(-40); hi.push(40); x0.push(0); }
+  // Lange Spur (> 0,15 s): auch den Auftrieb durch Backspin schaetzen
+  if (track.length >= 12 && (t[t.length - 1] - t[0]) > 0.15) { lo.push(-5); hi.push(30); x0.push(3); }
+  let best = null;
+  for (const th0 of [5, 15, 30]) { x0[0] = th0 * rad; const r = lm(res, x0.slice(), lo, hi); if (!best || r.c < best.c) best = r; }
+  const pr = projiziere(bahn(best.x, t, B, vFest), f, cx, cy, al), gsc = sizeScale(pr);
+  let sp = 0, ss = 0, ns = 0;
+  pr.forEach((q, k) => { sp += (q[0] - obs[k][0]) ** 2 + (q[1] - obs[k][1]) ** 2; if (sw[k]) { ss += (gsc * f * BALL_D / q[2] - track[k].d) ** 2; ns++; } });
+  return { p: best.x, rms: Math.sqrt(sp / (2 * pr.length)), rmsD: ns ? Math.sqrt(ss / ns) : 0, t, gsc };
+}
+// ===== CORE END =====
+
+// ===== Oberflaeche =====
+const $ = id => document.getElementById(id);
+const video = $('video'), view = $('view'), vctx = view.getContext('2d');
+const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
+let W = 0, H = 0, nFrames = 0, cur = 0, ball = null, busy = false, lastText = '';
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('birdino.ballspur.' + k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('birdino.ballspur.' + k, v); } catch (e) {} }
+};
+['abstand', 'hoehe', 'hfov', 'fpsDatei', 'fpsReal', 'schwelle', 'maxb'].forEach(id => {
+  const el = $(id); el.value = store.get(id, el.value);
+  el.addEventListener('change', () => { store.set(id, el.value); if (id === 'fpsDatei' && W) setupFrames(); });
+});
+const num = id => { const v = parseFloat(String($(id).value).replace(',', '.')); return isFinite(v) ? v : NaN; };
+const de = (v, d = 1) => v.toFixed(d).replace('.', ',');
+
+function status(msg, err) { const s = $('status'); s.textContent = msg; s.classList.toggle('err', !!err); }
+function progress(p) { const b = $('bar'); if (p == null) { b.style.display = 'none'; return; } b.style.display = 'block'; $('barfill').style.width = Math.round(p * 100) + '%'; }
+
+let seekTimeouts = 0;
+function seekFrame(n) {
+  const F = num('fpsDatei') || 30;
+  const t = Math.min(Math.max(0, video.duration - 0.0005), (n + 0.5) / F);
+  return new Promise(res => {
+    let done = false;
+    const fin = to => { if (done) return; done = true; if (to === true) seekTimeouts++; video.removeEventListener('seeked', fin); res(); };
+    video.addEventListener('seeked', fin);
+    setTimeout(() => fin(true), 4000);
+    if (Math.abs(video.currentTime - t) < 1e-6) fin(); else video.currentTime = t;
+  });
+}
+
+// Abschlagzone: einmal pro Aufbau festgelegt (relativ zur Bildgroesse gespeichert)
+let zone = null;
+try { zone = JSON.parse(localStorage.getItem('birdino.ballspur.zone') || 'null'); } catch (e) {}
+const zoneR = () => 0.08 * Math.max(W, H);
+function zoneInfo() {
+  $('zoneinfo').textContent = zone ? 'Abschlagzone: festgelegt – Suche nur dort' : 'Abschlagzone: keine (ganzes untere Bild)';
+  $('zonedel').disabled = !zone || busy || !W; $('zoneset').disabled = busy || !W;
+}
+function drawView() {
+  vctx.drawImage(video, 0, 0, W, H);
+  if (zone) {
+    vctx.save(); vctx.setLineDash([W / 60, W / 90]); vctx.lineWidth = Math.max(3, W / 300);
+    vctx.strokeStyle = '#F08A24'; vctx.beginPath(); vctx.arc(zone.x * W, zone.y * H, zoneR(), 0, Math.PI * 2); vctx.stroke(); vctx.restore();
+  }
+  if (ball) {
+    vctx.lineWidth = Math.max(3, W / 250);
+    vctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--mark').trim() || '#2E6AD6';
+    const rb = ball.d / 2 + vctx.lineWidth * 1.5;
+    vctx.beginPath(); vctx.arc(ball.x, ball.y, rb, 0, Math.PI * 2); vctx.stroke();
+    // vier Markierungsstriche, damit auch ein kleiner Ball gut zu finden ist
+    const g1 = rb + W / 60, g2 = rb + W / 18;
+    vctx.beginPath();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { vctx.moveTo(ball.x + dx * g1, ball.y + dy * g1); vctx.lineTo(ball.x + dx * g2, ball.y + dy * g2); }
+    vctx.stroke();
+  }
+  $('flabel').textContent = `Bild ${cur} von ${nFrames - 1}`;
+}
+
+let pending = null, seeking = false;
+async function gotoFrame(n) {
+  pending = Math.max(0, Math.min(nFrames - 1, n));
+  if (seeking) return;
+  seeking = true;
+  while (pending !== null) { const m = pending; pending = null; cur = m; $('slider').value = m; await seekFrame(m); drawView(); }
+  seeking = false;
+}
+
+function setupFrames() {
+  const F = num('fpsDatei') || 30;
+  nFrames = Math.max(1, Math.floor(video.duration * F));
+  $('slider').max = nFrames - 1;
+  $('vinfo').textContent = `${W} × ${H} Pixel, ${de(video.duration, 1)} s, ${nFrames} Bilder bei ${de(F, 0)} B/s`;
+  gotoFrame(Math.min(cur, nFrames - 1));
+}
+
+function enable(on) {
+  document.querySelectorAll('.scrub button, #slider').forEach(b => b.disabled = !on);
+  $('run').disabled = !on || !ball;
+  $('dminus').disabled = $('dplus').disabled = $('diag').disabled = !on || !ball;
+  $('file').disabled = false;
+}
+
+$('file').addEventListener('click', e => { e.target.value = ''; });
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  // Auswahl erst beim naechsten Antippen leeren (siehe click-Handler); sofortiges Leeren kann unter iOS die Datei ungueltig machen
+  if (!f) return;
+  if (busy) { status('Bitte warten, bis die Auswertung fertig ist.', true); return; }
+  status('Video wird geladen …'); ball = null; mode = 'start'; lastTreff = null; $('result').hidden = true; updateBallInfo();
+  if (video.src) URL.revokeObjectURL(video.src);
+  video.src = URL.createObjectURL(f);
+  try {
+    await new Promise((res, rej) => { video.onloadedmetadata = res; video.onerror = () => rej(new Error('load')); setTimeout(() => rej(new Error('timeout')), 20000); video.load(); });
+    try { await Promise.race([video.play().then(() => video.pause()), new Promise(r => setTimeout(r, 1500))]); } catch (_) {}
+  } catch (err) { status('Das Video lässt sich nicht öffnen. Anderes Format oder Datei beschädigt.', true); return; }
+  W = video.videoWidth; H = video.videoHeight;
+  view.width = W; view.height = H; $('empty').hidden = true;
+  cur = 0; setupFrames(); enable(true);
+  status('Suche den Ball …');
+  zoneInfo(); drawView();
+  const found = await autoBall();
+  if (found) { status('Ball gefunden – werte aus …'); runAnalysis(null); }
+  else { $('bildDetails').open = true; status('Ball nicht automatisch gefunden. Unter „Bild, Ball und Abschlagzone“ den Ball antippen und „Ball verfolgen“. ' + autoInfo, true); }
+});
+
+$('slider').addEventListener('input', e => gotoFrame(+e.target.value));
+document.querySelectorAll('.scrub button').forEach(b => b.addEventListener('click', () => gotoFrame(cur + +b.dataset.step)));
+
+function updateBallInfo() {
+  if (typeof zoneInfo === 'function' && W) zoneInfo();
+  $('ballinfo').textContent = ball ? `Ball: ${Math.round(ball.d)} px bei Bild ${ball.frame}` : 'Ball: noch nicht markiert';
+  $('run').disabled = !ball || busy;
+  $('dminus').disabled = $('dplus').disabled = $('diag').disabled = !ball || busy;
+}
+
+// Ball automatisch finden: heller, runder Fleck, der im ersten Bild liegt und im letzten fehlt
+// Ball automatisch finden ueber das Treffer-Ereignis:
+// Gesucht ist ein heller, runder Fleck, der ruhig liegt und dann ploetzlich verschwindet,
+// waehrend um ihn herum heftige Bewegung ist (Schlaeger). Das funktioniert auch, wenn der Ball
+// erst spaeter aufgelegt wird oder andere Baelle herumliegen - und genauso spaeter live im Ringpuffer.
+async function autoBall() {
+  try {
+    const sc = Math.min(1, 640 / Math.max(W, H)), w = Math.round(W * sc), h = Math.round(H * sc);
+    const cache = new Map(), blobCache = new Map();
+    const grabSmall = async n => {
+      n = Math.max(0, Math.min(nFrames - 1, n));
+      if (cache.has(n)) return cache.get(n);
+      await seekFrame(n); work.width = w; work.height = h; wctx.drawImage(video, 0, 0, W, H, 0, 0, w, h);
+      const d = wctx.getImageData(0, 0, w, h).data, g = new Float32Array(w * h);
+      for (let i = 0, j = 0; i < w * h; i++, j += 4) g[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+      cache.set(n, g); return g;
+    };
+    const R = Math.max(6, Math.round(w / 14));
+    const blobs = (n, g0) => {
+      if (blobCache.has(n)) return blobCache.get(n);
+      const I = new Float64Array((w + 1) * (h + 1));
+      for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += g0[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + row; } }
+      const m = new Uint8Array(w * h);
+      // der ruhende Ball liegt immer in der unteren Bildhaelfte
+      for (let y = zone ? 0 : Math.round(h * 0.5); y < h; y++) for (let x = 0; x < w; x++) {
+        const xa = Math.max(0, x - R), xb = Math.min(w, x + R + 1), ya = Math.max(0, y - R), yb = Math.min(h, y + R + 1);
+        const sum = I[yb * (w + 1) + xb] - I[ya * (w + 1) + xb] - I[yb * (w + 1) + xa] + I[ya * (w + 1) + xa];
+        if (g0[y * w + x] - sum / ((xb - xa) * (yb - ya)) > 18) m[y * w + x] = 1;
+      }
+      const out = [];
+      for (const c of components(m, w, h, 4, 4000)) {
+        const dFull = 2 * c.r / sc; if (dFull < 10 || dFull > 120) continue;
+        const rund = c.a / (Math.PI * c.r * c.r + 1e-6); if (rund < 0.45) continue;
+        if (zone && Math.hypot(c.x / sc - zone.x * W, c.y / sc - zone.y * H) > zoneR()) continue;
+        out.push({ ...c, dFull, rund });
+      }
+      blobCache.set(n, out); return out;
+    };
+    const mean = (ga, gb, pix) => { let su = 0; for (const q of pix) su += Math.abs(ga[q] - gb[q]); return su / pix.length; };
+    const boxMot = (ga, gb, cx, cy, hr) => {
+      let su = 0, n = 0;
+      for (let y = Math.max(0, Math.round(cy - hr)); y < Math.min(h, Math.round(cy + hr)); y++)
+        for (let x = Math.max(0, Math.round(cx - hr)); x < Math.min(w, Math.round(cx + hr)); x++) { su += Math.abs(ga[y * w + x] - gb[y * w + x]); n++; }
+      return n ? su / n : 0;
+    };
+    const step = Math.max(2, Math.round((num('fpsReal') || 240) / 30)); // bei 240 B/s: 8 Bilder = 1/30 s
+    const z = { bilder: 0, flecken: 0, bewegt: 0, nichtWeg: 0, kandidaten: 0, bew: 0 };
+    const t0 = Date.now(), to0 = seekTimeouts;
+    let best = null; const alle = [];
+    for (let k = step; k + 3 * step < nFrames; k += step) {
+      const gp = await grabSmall(k - step), g0 = await grabSmall(k), g1 = await grabSmall(k + step), g3 = await grabSmall(k + 3 * step);
+      z.bilder++;
+      { let su = 0; for (let i = 0; i < g0.length; i += 7) su += Math.abs(g1[i] - g0[i]); z.bew = Math.max(z.bew, su / (g0.length / 7)); }
+      if (z.bilder % 10 === 0) status(`Suche den Ball … ${Math.round(100 * k / nFrames)} %`);
+      for (const c of blobs(k, g0)) {
+        z.flecken++;
+        if (mean(gp, g0, c.pix) > 12) { z.bewegt++; continue; }                       // muss ruhig liegen
+        const gone1 = mean(g1, g0, c.pix), gone3 = mean(g3, g0, c.pix);
+        if (gone1 < 25 || gone3 < 25) { z.nichtWeg++; continue; }                     // muss weg sein und weg bleiben
+        z.kandidaten++;
+        const hell = c.pix.reduce((p, q) => p + g0[q], 0) / c.pix.length;
+        const mot = boxMot(g1, g0, c.x, c.y, 3 * c.r + 4);                             // Schlaeger und Haende rund um den Ball
+        const mx_ = ((c.x / sc) - W / 2) / (0.35 * W), mitte = Math.exp(-(mx_ * mx_));
+        const gr = Math.min(1, c.dFull / 22);
+        const score = Math.min(c.rund, 0.8) * Math.min(gone1, 100) * (hell / 255) * mitte * gr * gr * (1 + Math.min(mot, 60) / 20);
+        const kand = { score, k, c, x: c.x / sc, y: c.y / sc };
+        alle.push(kand);
+        if (!best || score > best.score) best = kand;
+      }
+    }
+    autoInfo = `Suche: ${z.bilder} Zeitpunkte, ${z.flecken} helle runde Flecken, davon ${z.bewegt} nicht ruhig, ${z.nichtWeg} nicht verschwunden, ${z.kandidaten} mögliche Treffer. Stärkste Bildänderung ${z.bew.toFixed(1)}, Sprünge ohne Antwort ${seekTimeouts - to0}, Dauer ${Math.round((Date.now() - t0) / 1000)} s.`;
+    if (!best) { await gotoFrame(2); return false; }
+    // Alle Kandidaten behalten (nach Wertung, ohne Doppelte an derselben Stelle);
+    // welcher wirklich wegfliegt, entscheidet spaeter die Verfolgung.
+    alle.sort((p, q) => q.score - p.score);
+    const wahl = [];
+    for (const kd of alle) {
+      if (wahl.some(o => Math.hypot(o.x - kd.x, o.y - kd.y) < 1.5 * kd.c.dFull && Math.abs(o.k - kd.k) < 6 * step)) continue;
+      wahl.push(kd); if (wahl.length >= 4) break;
+    }
+    autoCands = [];
+    for (const kd of wahl) {
+      const gk = await grabSmall(kd.k);
+      let start = kd.k;
+      for (let j = 6; j >= 1; j--) {
+        const n = kd.k - j * step; if (n < 0) continue;
+        if (mean(await grabSmall(n), gk, kd.c.pix) <= 12) { start = n; break; }
+      }
+      await gotoFrame(start);
+      const b = refineBall(kd.x, kd.y);
+      if (!b.unsure) autoCands.push({ x: b.x, y: b.y, d: b.d, frame: start, auto: true });
+    }
+    if (!autoCands.length) { autoInfo += ' Feinbestimmung unsicher.'; return false; }
+    if (autoCands.length > 1) autoInfo += ` ${autoCands.length} mögliche Bälle – beim Verfolgen wird geprüft, welcher wegfliegt.`;
+    ball = autoCands[0];
+    await gotoFrame(ball.frame);
+    drawView(); updateBallInfo();
+    return true;
+  } catch (e) { autoInfo = 'Suche abgebrochen: ' + (e && e.message); return false; }
+}
+let autoInfo = '', autoCands = [];
+
+// Ball um den Tipp-Punkt herum genau bestimmen
+function refineBall(tx, ty) {
+  const win = Math.round(Math.max(60, Math.max(W, H) * 0.06));
+  const sx = Math.max(0, Math.min(W - win, Math.round(tx - win / 2))), sy = Math.max(0, Math.min(H - win, Math.round(ty - win / 2)));
+  work.width = win; work.height = win;
+  wctx.drawImage(video, sx, sy, win, win, 0, 0, win, win);
+  const d = wctx.getImageData(0, 0, win, win).data, n = win * win, g = new Float32Array(n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) g[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+  const lx = tx - sx, ly = ty - sy, R = win / 4;
+  let bi = -1, bv = -1;
+  for (let y = 0; y < win; y++) for (let x = 0; x < win; x++) if (Math.hypot(x - lx, y - ly) <= R && g[y * win + x] > bv) { bv = g[y * win + x]; bi = y * win + x; }
+  const sorted = Array.from(g).sort((a, b) => a - b), med = sorted[n >> 1];
+  const th = med + 0.3 * (bv - med);
+  const seen = new Uint8Array(n), st = [bi]; seen[bi] = 1;
+  let a = 0, sxs = 0, sys = 0, mnx = win, mxx = 0, mny = win, mxy = 0;
+  while (st.length) {
+    const p = st.pop(), x = p % win, y = (p / win) | 0; a++; sxs += x; sys += y;
+    if (x < mnx) mnx = x; if (x > mxx) mxx = x; if (y < mny) mny = y; if (y > mxy) mxy = y;
+    for (const q of [p - 1, p + 1, p - win, p + win]) {
+      if (q < 0 || q >= n || seen[q]) continue;
+      if ((q === p - 1 && x === 0) || (q === p + 1 && x === win - 1)) continue;
+      if (g[q] >= th) { seen[q] = 1; st.push(q); }
+    }
+  }
+  const dd = Math.max(2 * Math.sqrt(a / Math.PI), (mxx - mnx + mxy - mny) / 2 + 1);
+  if (bv - med < 25 || a < 4 || dd > win * 0.7) return { x: tx, y: ty, d: Math.max(10, W / 50), unsure: true };
+  return { x: sx + sxs / a, y: sy + sys / a, d: dd, unsure: false };
+}
+
+view.addEventListener('click', e => {
+  if (!W || busy) return;
+  const r = view.getBoundingClientRect();
+  const tx = (e.clientX - r.left) / r.width * W, ty = (e.clientY - r.top) / r.height * H;
+  if (mode === 'zone') {
+    mode = 'start';
+    zone = { x: tx / W, y: ty / H };
+    try { localStorage.setItem('birdino.ballspur.zone', JSON.stringify(zone)); } catch (e2) {}
+    zoneInfo(); drawView();
+    status('Abschlagzone gespeichert. Suche den Ball darin …');
+    autoBall().then(found => {
+      if (found) { status('Ball in der Abschlagzone gefunden – werte aus …'); runAnalysis(null); }
+      else status('Kein Ball in der Abschlagzone gefunden. ' + autoInfo, true);
+    });
+    return;
+  }
+  if (mode === 'seed') {
+    if (cur <= lastTreff) { status(`Ein Bild nach dem Treffmoment wählen (nach Bild ${lastTreff}).`, true); return; }
+    const sb = refineBall(tx, ty);
+    mode = 'start';
+    runAnalysis({ f: cur, x: sb.x, y: sb.y, d: Math.min(sb.d, ball.d) });
+    return;
+  }
+  const b = refineBall(tx, ty);
+  autoCands = [];
+  ball = { x: b.x, y: b.y, d: b.d, frame: cur };
+  drawView(); updateBallInfo();
+  status(b.unsure ? 'Ball nicht eindeutig erkannt. Genauer tippen oder Kreis mit − / + anpassen.' : 'Ball markiert. Passt der Kreis, auf „Ball verfolgen“ tippen.', b.unsure);
+});
+$('dminus').addEventListener('click', () => { if (ball) { ball.d = Math.max(3, ball.d * 0.9); drawView(); updateBallInfo(); } });
+$('dplus').addEventListener('click', () => { if (ball) { ball.d *= 1.1; drawView(); updateBallInfo(); } });
+$('zoneset').addEventListener('click', () => {
+  if (!W || busy) return;
+  mode = 'zone'; $('bildDetails').open = true;
+  document.querySelector('.frame').scrollIntoView({ behavior: 'auto', block: 'center' });
+  status('Auf die Stelle tippen, an der der Ball zum Schlagen liegt (z. B. am Tee). Der orange Kreis zeigt die Zone.');
+});
+$('zonedel').addEventListener('click', () => {
+  zone = null; try { localStorage.removeItem('birdino.ballspur.zone'); } catch (e) {}
+  zoneInfo(); drawView(); status('Abschlagzone gelöscht – die Suche nutzt wieder die ganze untere Bildhälfte.');
+});
+// Diagnose: misst fuer den markierten Ball genau die Groessen, nach denen die automatische Suche entscheidet
+$('diag').addEventListener('click', async () => {
+  if (!ball || busy) return;
+  const sc = Math.min(1, 640 / Math.max(W, H)), w = Math.round(W * sc), h = Math.round(H * sc);
+  const step = Math.max(2, Math.round((num('fpsReal') || 240) / 30)), k = cur;
+  const grabS = async n => { await seekFrame(Math.max(0, Math.min(nFrames - 1, n))); work.width = w; work.height = h; wctx.drawImage(video, 0, 0, W, H, 0, 0, w, h);
+    const d = wctx.getImageData(0, 0, w, h).data, g = new Float32Array(w * h); for (let i = 0, j = 0; i < w * h; i++, j += 4) g[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2]; return g; };
+  const gp = await grabS(k - step), g0 = await grabS(k), g1 = await grabS(k + step), g3 = await grabS(k + 3 * step);
+  const R = Math.max(6, Math.round(w / 14)), bx = ball.x * sc, by = ball.y * sc, rr = Math.max(2, ball.d * sc / 2);
+  // lokaler Kontrast des Balls
+  let bs = 0, bn = 0, us = 0, un = 0, pix = [];
+  for (let y = Math.max(0, Math.round(by - R)); y < Math.min(h, Math.round(by + R)); y++) for (let x = Math.max(0, Math.round(bx - R)); x < Math.min(w, Math.round(bx + R)); x++) {
+    const i = y * w + x, dd = Math.hypot(x - bx, y - by); us += g0[i]; un++; if (dd <= rr * 0.8) { bs += g0[i]; bn++; pix.push(i); } }
+  const mean = g => pix.reduce((a, q) => a + Math.abs(g[q] - g0[q]), 0) / Math.max(1, pix.length);
+  const kontrast = bn ? bs / bn - us / un : 0;
+  await gotoFrame(k);
+  status(`Prüfung Bild ${k}: Ballhelligkeit ${Math.round(bs / Math.max(1, bn))}, Kontrast ${de(kontrast, 0)} (Suche braucht > 18), ruhig ${de(mean(gp), 0)} (braucht ≤ 12), weg nach 1/30 s ${de(mean(g1), 0)} und nach 3/30 s ${de(mean(g3), 0)} (beide brauchen ≥ 25), Ball ${Math.round(ball.d)} px.`);
+});
+
+let mode = 'start', lastTreff = null;
+$('run').addEventListener('click', () => { mode = 'start'; runAnalysis(null); });
+// Fuehrt die Spur zum markierten Ball zurueck? (Gerade durch die ersten Punkte, verlaengert bis zum Treffmoment)
+function rueckOf(out, cx0, cy0) {
+  const q = out.track.slice(0, Math.min(6, out.track.length)), n = q.length;
+  if (n < 2) return Infinity;
+  const mf = q.reduce((a, p) => a + p.f, 0) / n, mx = q.reduce((a, p) => a + p.x, 0) / n, my = q.reduce((a, p) => a + p.y, 0) / n;
+  let sff = 0, sfx = 0, sfy = 0; for (const p of q) { sff += (p.f - mf) ** 2; sfx += (p.f - mf) * (p.x - mx); sfy += (p.f - mf) * (p.y - my); }
+  const bx = sff ? sfx / sff : 0, by = sff ? sfy / sff : 0;
+  return Math.hypot(mx + bx * (out.treff - mf) - cx0, my + by * (out.treff - mf) - cy0);
+}
+async function runAnalysis(seed) {
+  if (!ball || busy) return;
+  const abIn = num('abstand'), hoehe = num('hoehe');
+  if (!(hoehe >= 0)) { status('Höhe der Linse über der Ballmitte in Metern eintragen, z. B. 0,2.', true); return; }
+  const abCheck = abIn > 0 ? abIn : 2;
+  if (abCheck < 0.5 || abCheck > 6 || hoehe > 2.2) { status(`Aufbau prüfen: Abstand ${de(abCheck, 2)} m, Höhe ${de(hoehe, 2)} m. Üblich sind 1–3 m Abstand hinter dem Ball und 0,1–0,5 m Höhe (im Stehen etwa 1,5 m). Vertauscht?`, true); return; }
+  const fpsReal = num('fpsReal') || 240, hfov = num('hfov') || 64, T = num('schwelle') || 20, maxB = Math.round(num('maxb') || 40);
+  const speed = num('speed');
+  busy = true; enable(false); $('result').hidden = true;
+  const versuch = async (bb, prefix) => {
+    const cx0 = bb.x, cy0 = bb.y, d0 = bb.d;
+    const x0 = Math.max(0, Math.round(cx0 - 0.45 * W)), x1 = Math.min(W, Math.round(cx0 + 0.45 * W));
+    const y0 = 0, y1 = Math.min(H, Math.round(cy0 + 3 * d0 + 20));
+    const crop = { x0, y0, cw: x1 - x0, ch: y1 - y0 };
+    work.width = crop.cw; work.height = crop.ch;
+    const grab = async n => {
+      await seekFrame(n);
+      wctx.drawImage(video, x0, y0, crop.cw, crop.ch, 0, 0, crop.cw, crop.ch);
+      const img = wctx.getImageData(0, 0, crop.cw, crop.ch);
+      return { img, g: blurGray(img.data, crop.cw, crop.ch) };
+    };
+    const roiC = document.createElement('canvas'), roiX = roiC.getContext('2d', { willReadFrequently: true });
+    const grabRoi = async (n, rx, ry, rw) => {
+      await seekFrame(n);
+      const m = 4, sz = rw + 2 * m; roiC.width = sz; roiC.height = sz;
+      roiX.drawImage(video, rx - m, ry - m, sz, sz, 0, 0, sz, sz);
+      const g = blurGray(roiX.getImageData(0, 0, sz, sz).data, sz, sz), r = new Float32Array(rw * rw);
+      for (let y = 0; y < rw; y++) for (let x = 0; x < rw; x++) r[y * rw + x] = g[(y + m) * sz + x + m];
+      return r;
+    };
+    // Brennweite: mit gemessenem Abstand aus dem ruhenden Ball kalibrieren, sonst aus dem Bildwinkel;
+    // ohne Abstand ergibt sich der Abstand aus der Ballgroesse
+    const cx = W / 2, cy = H / 2;
+    let f, abstand, fQuelle, abQuelle;
+    if (abIn > 0) { abstand = abIn; f = d0 * Math.hypot(abstand, hoehe) / BALL_D; fQuelle = 'am Ball kalibriert'; abQuelle = 'gemessen'; }
+    else { f = Math.max(W, H) / 2 / Math.tan(hfov * Math.PI / 360); const Z = f * BALL_D / d0; abstand = Math.sqrt(Math.max(0.01, Z * Z - hoehe * hoehe)); fQuelle = `aus Bildwinkel ${de(hfov, 0)}°`; abQuelle = 'aus Ballgröße'; }
+    const hfovEff = 2 * Math.atan(Math.max(W, H) / 2 / f) * 180 / Math.PI;
+    const { al, B } = kameraLage([cx0, cy0], f, cx, cy, abstand, hoehe);
+    const vF = speed > 0 ? speed / 3.6 : null;
+    // Rohes Grau (ohne Weichzeichnen) fuer die Feinsuche nach dem kleinen Ball
+    const grabRaw = async (n, rx, ry, rw) => {
+      await seekFrame(n);
+      roiC.width = rw; roiC.height = rw;
+      roiX.drawImage(video, rx, ry, rw, rw, 0, 0, rw, rw);
+      const d = roiX.getImageData(0, 0, rw, rw).data, r = new Float32Array(rw * rw);
+      for (let i = 0, j = 0; i < rw * rw; i++, j += 4) r[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+      return r;
+    };
+    // Vorhersage aus der physikalischen Bahn: wo muss der Ball in Bild n sein?
+    const makePredictor = (trk, tf) => {
+      if (trk.length < 10) return null;
+      try {
+        const ft = anpassen(trk, tf, fpsReal, f, cx, cy, al, B, vF);
+        if (!(ft.rms < 3)) return null;
+        return n => { const q = projiziere(bahn(ft.p, [(n - tf + 0.5) / fpsReal], B, vF), f, cx, cy, al)[0]; return q[2] > 0.3 ? [q[0], q[1]] : null; };
+      } catch (e) { return null; }
+    };
+    let out;
+    try {
+      out = await analyse({
+        grab, grabRoi, grabRaw, makePredictor, nFrames, start: bb.frame, ball: bb, crop, T, maxB, seed, treff: seed ? lastTreff : undefined,
+        onProgress: (phase, a, b) => {
+          if (phase === 'treff') { status(`Suche Treffmoment … Bild ${bb.frame + a}${prefix}`); progress(Math.min(0.5, a / Math.max(b, 1) * 0.5 + 0.02)); }
+          else if (phase === 'ext') { status(a < 0 ? `Suche die ersten Bilder nach dem Treffer … ${-a}` : `Verfolge den kleinen Ball weiter … +${a} Bilder`); progress(0.97); }
+          else { status(`Verfolge Ball … ${a} von ${b}${prefix}`); progress(0.5 + 0.45 * a / b); }
+        }
+      });
+    } catch (err) { out = { error: 'fail' }; }
+    return { out, cx0, cy0, d0, crop, f, abstand, fQuelle, abQuelle, hfovEff, al, B, cx, cy, vF };
+  };
+  // Mehrere moegliche Baelle (automatisch gefunden): jeden verfolgen und den nehmen, der wirklich wegfliegt
+  const kands = (!seed && ball.auto && autoCands.length > 1) ? autoCands : [ball];
+  let R = null;
+  for (let i = 0; i < kands.length; i++) {
+    const r = await versuch(kands[i], kands.length > 1 ? ` (Ball ${i + 1} von ${kands.length})` : '');
+    const ok = !r.out.error && r.out.track.length >= 6;
+    r.rueck = ok ? rueckOf(r.out, r.cx0, r.cy0) : Infinity;
+    r.gut = ok && r.rueck <= 2 * r.d0;
+    r.wert = ok ? r.out.track.length : 0;
+    if (!R || (r.gut && !R.gut) || (r.gut === R.gut && r.wert > R.wert)) { R = r; ball = kands[i]; }
+    if (r.gut && r.wert >= 20) break;
+  }
+  const { out, cx0, cy0, d0, crop, f, abstand, fQuelle, abQuelle, hfovEff, al, B, cx, cy, vF } = R;
+  progress(null);
+  busy = false; enable(true); updateBallInfo();
+  await gotoFrame(cur);
+  if (out.error === 'treff') { status('Kein Treffmoment gefunden. Ein früheres Startbild wählen, auf dem der Schläger weit vom Ball weg ist.', true); return; }
+  if (out.error) { status('Die Auswertung ist abgebrochen. Video neu laden und noch einmal versuchen.', true); return; }
+  if (out.track.length < 4) { status(`Ball nur in ${out.track.length} Bildern gefunden – zu wenig. Bewegungsschwelle senken (z. B. 12) oder Startbild prüfen.`, true); return; }
+
+  const fit = anpassen(out.track, out.treff, fpsReal, f, cx, cy, al, B, vF);
+  const rueck = rueckOf(out, cx0, cy0);
+  const th = fit.p[0] * 180 / Math.PI, ph = fit.p[1] * 180 / Math.PI;
+  $('rDir').textContent = de(Math.abs(ph)) + '°';
+  $('rDirSub').textContent = Math.abs(ph) < 0.05 ? 'gerade' : (ph > 0 ? 'rechts' : 'links');
+  $('rLaunch').textContent = de(th) + '°';
+  if (vF) { $('rSpeed').textContent = de(speed, 0); $('rSpeedSub').textContent = 'km/h, vorgegeben'; }
+  else { $('rSpeed').textContent = de(fit.p[2] * 3.6, 0); $('rSpeedSub').textContent = 'km/h, nur grob'; }
+
+  renderResult(out, fit, { f, cx, cy, al, B, vF, crop, d0, cx0, cy0 });
+  const v0 = vF || fit.p[2], aL = fit.p.length > 3 ? fit.p[3] : 0;
+  const aV = fit.p.length > 4 ? fit.p[4] : null;
+  const fl = flug(fit.p[0], fit.p[1], v0, aL, aV);
+  $('rCarry').textContent = de(fl.carry, 0);
+  $('rCarrySub').textContent = vF ? 'Schätzung' : 'grob, ohne Radar';
+  $('rSide').textContent = de(Math.abs(fl.side), 0);
+  $('rSideSub').textContent = Math.abs(fl.side) < 0.5 ? 'gerade' : (fl.side > 0 ? 'rechts' : 'links');
+  $('rApex').textContent = de(fl.apex, 0);
+  renderTracer(out, fit, fl, { f, cx, cy, al, B, vF, crop });
+  renderFlug(fl);
+
+  const lines = [
+    '=== Birdino Ballspur (Web-App) ===',
+    `Video: ${W}x${H}, Datei ${de(num('fpsDatei') || 30, 0)} B/s, gerechnet mit ${de(fpsReal, 0)} B/s`,
+    `Brennweite: ${Math.round(f)} px (${fQuelle}, entspricht ${de(hfovEff, 0)} Grad Bildwinkel)`,
+    `Kamera: ${de(abstand, 2)} m hinter Ball (${abQuelle}), ${de(hoehe, 2)} m hoch`,
+    `Startbild ${ball.frame}, Ball bei (${Math.round(cx0)}, ${Math.round(cy0)}), ${Math.round(d0)} px`,
+    `Treffmoment: Bild ${out.treff}`,
+    `Ball gefunden in ${out.track.length} Bildern`,
+    `Kamera-Neigung (berechnet): ${al >= 0 ? '+' : ''}${de(al * 180 / Math.PI)} Grad`,
+    `STARTRICHTUNG: ${de(Math.abs(ph))} Grad ${ph > 0 ? 'rechts' : 'links'}`,
+    `ABSCHUSSWINKEL: ${de(th)} Grad`,
+    vF ? `Ballspeed vorgegeben: ${de(speed, 0)} km/h, Zeitversatz ${de(fit.p[2] * 1000)} ms` : `Ballspeed (nur grob aus Bild): ${de(fit.p[2] * 3.6, 0)} km/h`,
+    `Kurve (Seitenbeschleunigung): ${fit.p.length > 3 ? de(fit.p[3]) + ' m/s² ' + (fit.p[3] > 0 ? 'nach rechts' : 'nach links') : 'nicht geschaetzt (zu wenige Punkte)'}`,
+    `Auftrieb (Backspin): ${aV != null ? de(aV) + ' m/s² nach oben' : 'nicht geschaetzt (Spur zu kurz), Standardwert'}`,
+    `Flug-Schaetzung: Carry ${de(fl.carry, 0)} m, seitlich ${de(Math.abs(fl.side), 1)} m ${fl.side > 0 ? 'rechts' : 'links'}, Scheitel ${de(fl.apex, 1)} m`,
+    `Restfehler: ${de(fit.rms)} px (Position), ${de(fit.rmsD)} px (Ballgroesse), Groessenfaktor ${de(fit.gsc, 2)}`,
+    `Spur zurueckverlaengert zum Treffmoment: ${Math.round(rueck)} px neben dem markierten Ball (${de(rueck / d0, 1)} Balldurchmesser)`,
+    'Punkte (Bild, ms, x, y, Durchmesser px):',
+    ...out.track.map((p, k) => `  ${p.f}, ${(fit.t[k] * 1000).toFixed(1)}, ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.d.toFixed(1)}`)
+  ];
+  lastText = lines.join('\n');
+  $('details').textContent = lastText;
+  $('result').hidden = false;
+  const neig = al * 180 / Math.PI;
+  if (rueck > 2 * d0) status(`Achtung: Die Spur führt nicht zum markierten Ball zurück (${de(rueck / d0, 1)} Balldurchmesser daneben). Entweder ist ein anderer Ball markiert oder die Spur folgt etwas anderem. Werte nicht verwenden.`, true);
+  else if (abIn > 0 && (hfovEff < 45 || hfovEff > 90)) status(`Achtung: Aus Abstand und Ballgröße ergibt sich ein Bildwinkel von ${de(hfovEff, 0)}° – unwahrscheinlich. Abstand nachmessen oder prüfen, ob der blaue Kreis genau um den Ball liegt.`, true);
+  else if (neig < -50 || neig > 30) status(`Achtung: Kamera-Neigung ${de(neig)}° ist unwahrscheinlich. Höhe (Linse über Ballmitte, z. B. 0,2) und Abstand prüfen.`, true);
+  else status(`Fertig: ${out.track.length} Ballpositionen, Restfehler ${de(fit.rms)} px.`);
+  lastTreff = out.treff;
+  $('result').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  makeAndSave({ out, fit, fl, f, cx, cy, al, B, fpsReal, vF, speed });
+}
+
+function renderResult(out, fit, geo) {
+  const { crop, d0, cx0, cy0, f, cx, cy, al, B, vF } = geo;
+  const xs = [cx0, ...out.track.map(p => p.x)], ys = [cy0, ...out.track.map(p => p.y)];
+  const m = Math.round(4 * d0 + 40);
+  const bx0 = Math.max(0, Math.round(Math.min(...xs) - crop.x0 - m)), bx1 = Math.min(crop.cw, Math.round(Math.max(...xs) - crop.x0 + m));
+  const by0 = Math.max(0, Math.round(Math.min(...ys) - crop.y0 - m)), by1 = Math.min(crop.ch, Math.round(Math.max(...ys) - crop.y0 + m));
+  const rw = bx1 - bx0, rh = by1 - by0;
+  const tmp = document.createElement('canvas'); tmp.width = rw; tmp.height = rh;
+  const tctx = tmp.getContext('2d');
+  const img = tctx.createImageData(rw, rh), src = out.base.data, cw = crop.cw;
+  for (let y = 0; y < rh; y++) for (let x = 0; x < rw; x++) {
+    const si = ((y + by0) * cw + (x + bx0)) * 4, di = (y * rw + x) * 4;
+    img.data[di] = src[si]; img.data[di + 1] = src[si + 1]; img.data[di + 2] = src[si + 2]; img.data[di + 3] = 255;
+  }
+  for (const p of out.patches) {
+    for (let yy = -p.pr; yy <= p.pr; yy++) for (let xx = -p.pr; xx <= p.pr; xx++) {
+      if (xx * xx + yy * yy > p.pr * p.pr) continue;
+      const x = p.px + xx - bx0, y = p.py + yy - by0; if (x < 0 || y < 0 || x >= rw || y >= rh) continue;
+      const si = ((yy + p.pr) * p.sz + (xx + p.pr)) * 4; if (!p.data[si + 3]) continue;
+      const di = (y * rw + x) * 4; img.data[di] = p.data[si]; img.data[di + 1] = p.data[si + 1]; img.data[di + 2] = p.data[si + 2];
+    }
+  }
+  tctx.putImageData(img, 0, 0);
+  const sc = Math.min(3, Math.max(1, 900 / rw));
+  const outC = document.createElement('canvas'); outC.width = Math.round(rw * sc); outC.height = Math.round(rh * sc);
+  const o = outC.getContext('2d');
+  o.imageSmoothingQuality = 'high';
+  o.drawImage(tmp, 0, 0, outC.width, outC.height);
+  const toC = (x, y) => [(x - crop.x0 - bx0) * sc, (y - crop.y0 - by0) * sc];
+  const lw = Math.max(2, outC.width / 300);
+  const tMax = Math.max(...fit.t) * 1.3, tt = [...Array(61)].map((_, k) => tMax * k / 60);
+  const pts = projiziere(bahn(fit.p, tt, B, vF), f, cx, cy, al);
+  o.strokeStyle = '#F08A24'; o.lineWidth = lw * 1.3; o.lineCap = 'round'; o.lineJoin = 'round';
+  o.beginPath(); pts.forEach((q, k) => { const [x, y] = toC(q[0], q[1]); k ? o.lineTo(x, y) : o.moveTo(x, y); }); o.stroke();
+  o.strokeStyle = '#3CCB6A'; o.lineWidth = Math.max(1.5, lw * 0.6);
+  for (const p of out.track) { const [x, y] = toC(p.x, p.y); o.beginPath(); o.arc(x, y, (p.d / 2 + 2) * sc, 0, Math.PI * 2); o.stroke(); }
+  o.strokeStyle = '#3E7BF0'; o.lineWidth = lw;
+  { const [x, y] = toC(cx0, cy0); o.beginPath(); o.arc(x, y, (d0 / 2 + 3) * sc, 0, Math.PI * 2); o.stroke(); }
+  $('resImg').src = outC.toDataURL('image/jpeg', 0.9);
+}
+
+$('fix').addEventListener('click', async () => {
+  if (lastTreff == null) return;
+  mode = 'seed'; $('bildDetails').open = true;
+  document.querySelector('.frame').scrollIntoView({ behavior: 'auto', block: 'center' });
+  await gotoFrame(lastTreff + 6);
+  status(`Korrigieren: ein Bild nach dem Treffer suchen (ab Bild ${lastTreff + 1}), auf dem der Ball klar vom Schläger getrennt ist, und auf den Ball tippen.`);
+});
+function cssVar(n, d) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim() || d; }
+
+// Ganze geschaetzte Flugbahn ins Kamerabild zeichnen
+function renderTracer(out, fit, fl, geo) {
+  const { crop, f, cx, cy, al, B } = geo;
+  const sc = Math.min(1, 900 / crop.cw);
+  const tmp = document.createElement('canvas'); tmp.width = crop.cw; tmp.height = crop.ch;
+  tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(out.base.data), crop.cw, crop.ch), 0, 0);
+  const c = document.createElement('canvas'); c.width = Math.round(crop.cw * sc); c.height = Math.round(crop.ch * sc);
+  const o = c.getContext('2d'); o.drawImage(tmp, 0, 0, c.width, c.height);
+  const ca = Math.cos(al), sa = Math.sin(al), lw = Math.max(3, c.width / 180);
+  const toC = P => { const X = B[0] + P[0], Y = B[1] + P[1], Z = B[2] + P[2]; const Yc = Y * ca - Z * sa, Zc = Y * sa + Z * ca;
+    if (Zc < 0.3) return null; return [((cx + f * X / Zc) - crop.x0) * sc, ((cy - f * Yc / Zc) - crop.y0) * sc]; };
+  const pts = fl.pts.filter((_, k) => k % 4 === 0 || k === fl.pts.length - 1).map(toC).filter(Boolean);
+  o.lineCap = 'round'; o.lineJoin = 'round';
+  o.strokeStyle = 'rgba(0,0,0,.35)'; o.lineWidth = lw + 3;
+  o.beginPath(); pts.forEach((q, k) => k ? o.lineTo(q[0], q[1]) : o.moveTo(q[0], q[1])); o.stroke();
+  o.strokeStyle = '#F08A24'; o.lineWidth = lw;
+  o.beginPath(); pts.forEach((q, k) => k ? o.lineTo(q[0], q[1]) : o.moveTo(q[0], q[1])); o.stroke();
+  const end = pts[pts.length - 1];
+  if (end) { o.fillStyle = '#F08A24'; o.beginPath(); o.arc(end[0], end[1], lw * 1.6, 0, Math.PI * 2); o.fill(); }
+  $('tracerImg').src = c.toDataURL('image/jpeg', 0.88);
+}
+
+// Flug von oben und von der Seite
+function renderFlug(fl) {
+  const c = $('flugC'), o = c.getContext('2d'), Wc = c.width, Hc = c.height;
+  const surf = cssVar('--surface', '#fff'), ink = cssVar('--ink', '#1D2A23'), muted = cssVar('--muted', '#5A6B61'), line = cssVar('--line', '#D2DBD3'), tr = cssVar('--tracer', '#E2731A');
+  o.fillStyle = surf; o.fillRect(0, 0, Wc, Hc);
+  const pad = 46, xMax = Math.max(50, Math.ceil(fl.carry * 1.12 / 25) * 25);
+  const sideMax = Math.max(10, Math.ceil(Math.max(...fl.pts.map(p => Math.abs(p[0]))) * 1.4 / 5) * 5);
+  const hMax = Math.max(8, Math.ceil(fl.apex * 1.4 / 5) * 5);
+  o.font = '600 22px Barlow, system-ui, sans-serif'; o.textBaseline = 'alphabetic';
+  // Draufsicht (oben)
+  const top = { y0: 34, h: 250 }, side = { y0: 330, h: 190 };
+  const X = d => pad + (Wc - 2 * pad) * d / xMax;
+  o.fillStyle = muted; o.fillText('Von oben', pad, 26);
+  o.fillText('Von der Seite', pad, side.y0 - 8);
+  o.strokeStyle = line; o.lineWidth = 1.5; o.font = '500 18px Barlow, system-ui, sans-serif';
+  for (let d = 0; d <= xMax; d += xMax > 150 ? 50 : 25) {
+    o.beginPath(); o.moveTo(X(d), top.y0); o.lineTo(X(d), top.y0 + top.h); o.moveTo(X(d), side.y0); o.lineTo(X(d), side.y0 + side.h); o.stroke();
+    o.fillStyle = muted; o.fillText(d + ' m', X(d) - 14, side.y0 + side.h + 24);
+  }
+  const Ty = sv => top.y0 + top.h / 2 + (top.h / 2) * sv / sideMax;
+  o.setLineDash([8, 8]); o.strokeStyle = muted; o.beginPath(); o.moveTo(X(0), Ty(0)); o.lineTo(X(xMax), Ty(0)); o.stroke(); o.setLineDash([]);
+  o.fillStyle = muted; o.fillText('Ziellinie', X(xMax) - 70, Ty(0) - 8);
+  o.fillText('rechts', pad + 4, top.y0 + top.h - 8); o.fillText('links', pad + 4, top.y0 + 20);
+  const Sy = hv => side.y0 + side.h - side.h * hv / hMax;
+  o.strokeStyle = ink; o.lineWidth = 2; o.beginPath(); o.moveTo(X(0), Sy(0)); o.lineTo(X(xMax), Sy(0)); o.stroke();
+  o.strokeStyle = tr; o.lineWidth = 4; o.lineCap = 'round';
+  o.beginPath(); fl.pts.forEach((p, k) => k ? o.lineTo(X(p[2]), Ty(p[0])) : o.moveTo(X(p[2]), Ty(p[0]))); o.stroke();
+  o.beginPath(); fl.pts.forEach((p, k) => k ? o.lineTo(X(p[2]), Sy(p[1])) : o.moveTo(X(p[2]), Sy(p[1]))); o.stroke();
+  const e = fl.pts[fl.pts.length - 1];
+  o.fillStyle = tr; o.beginPath(); o.arc(X(e[2]), Ty(e[0]), 7, 0, Math.PI * 2); o.fill();
+  o.fillStyle = ink; o.font = '700 22px "Barlow Condensed", system-ui, sans-serif';
+  o.fillText(`${de(fl.carry, 0)} m`, Math.min(X(e[2]) + 10, Wc - 80), Ty(e[0]) + 7);
+}
+
+$('copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(lastText); $('copy').textContent = 'Kopiert'; }
+  catch (e) {
+    const r = document.createRange(); r.selectNodeContents($('details'));
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    $('copy').textContent = 'Markiert – jetzt kopieren';
+  }
+  setTimeout(() => { $('copy').textContent = 'Werte kopieren'; }, 2500);
+});
+
+// ===== Tracer-Video, Schlagliste, Teilen (PWA) =====
+const DB = {
+  db: null,
+  async open() {
+    if (this.db) return this.db;
+    this.db = await new Promise((res, rej) => {
+      const r = indexedDB.open('birdino-ballspur', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('schlaege', { keyPath: 'id', autoIncrement: true });
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    return this.db;
+  },
+  async tx(mode, fn) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('schlaege', mode), r = fn(t.objectStore('schlaege'));
+      t.oncomplete = () => res(r ? r.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+    });
+  },
+  put(o) { return this.tx('readwrite', s => s.put(o)); },
+  get(id) { return this.tx('readonly', s => s.get(id)); },
+  all() { return this.tx('readonly', s => s.getAll()); },
+  del(id) { return this.tx('readwrite', s => s.delete(id)); }
+};
+
+const datumText = ms => new Date(ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+const werteText = w => `${de(w.abschuss)}° Abschuss · ${de(Math.abs(w.richtung))}° ${Math.abs(w.richtung) < 0.05 ? 'gerade' : (w.richtung > 0 ? 'rechts' : 'links')} · ${de(w.carry, 0)} m Carry`;
+
+async function teilen(blob, name) {
+  const file = new File([blob], name, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Birdino Ballspur' }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 3000);
+}
+
+// Video-Encoder: WebCodecs + MP4 (exakte Zeitstempel), sonst MediaRecorder in Echtzeit
+async function makeEncoder(w, h, fps) {
+  if (window.VideoEncoder && window.VideoFrame && window.Mp4Muxer) {
+    for (const codec of ['avc1.640028', 'avc1.4d0028', 'avc1.42001f']) {
+      const cfg = { codec, width: w, height: h, bitrate: 6000000, framerate: fps };
+      try { const sup = await VideoEncoder.isConfigSupported(cfg); if (!sup.supported) continue; } catch (e) { continue; }
+      const target = new Mp4Muxer.ArrayBufferTarget();
+      const muxer = new Mp4Muxer.Muxer({ target, video: { codec: 'avc', width: w, height: h }, fastStart: 'in-memory' });
+      let err = null;
+      const encoder = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { err = e; } });
+      encoder.configure(cfg);
+      return {
+        add: async (canvas, i) => {
+          if (err) throw err;
+          const fr = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / fps), duration: Math.round(1e6 / fps) });
+          encoder.encode(fr, { keyFrame: i % 60 === 0 }); fr.close();
+          while (encoder.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 5));
+        },
+        finish: async () => {
+          await encoder.flush(); if (err) throw err;
+          muxer.finalize(); encoder.close();
+          return new Blob([target.buffer], { type: 'video/mp4' });
+        }
+      };
+    }
+  }
+  if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) return null;
+  const frames = [];
+  return {
+    add: async canvas => { frames.push(await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85))); },
+    finish: async () => {
+      const pc = document.createElement('canvas'); pc.width = w; pc.height = h; const po = pc.getContext('2d');
+      const mime = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+      const bm0 = await createImageBitmap(frames[0]); po.drawImage(bm0, 0, 0);
+      const rec = new MediaRecorder(pc.captureStream(fps), mime ? { mimeType: mime, videoBitsPerSecond: 6000000 } : undefined);
+      const parts = []; rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
+      const done = new Promise(r => { rec.onstop = r; });
+      rec.start(); const t0 = performance.now();
+      for (let i = 0; i < frames.length; i++) {
+        const bm = await createImageBitmap(frames[i]); po.drawImage(bm, 0, 0); if (bm.close) bm.close();
+        const wait = t0 + (i + 1) * 1000 / fps - performance.now(); if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      }
+      rec.stop(); await done;
+      return new Blob(parts, { type: rec.mimeType || mime || 'video/webm' });
+    }
+  };
+}
+
+// Tracer-Video: Zeitlupe mit mitwachsender Flugbahn, danach Standbild mit ganzer Bahn und Werten
+async function tracerVideo(g, onProg) {
+  const { out, fit, fl, f, cx, cy, al, B, fpsReal } = g;
+  const sc = Math.min(1, 1280 / Math.max(W, H));
+  const w = Math.round(W * sc / 2) * 2, h = Math.round(H * sc / 2) * 2, fps = 30;
+  const n0 = Math.max(ball.frame, out.treff - Math.round(0.15 * fpsReal));
+  const nLast = out.track.length ? out.track[out.track.length - 1].f : out.treff;
+  const n1 = Math.min(nFrames - 1, nLast + Math.round(0.1 * fpsReal));
+  const nVid = n1 - n0 + 1, holdN = Math.round(2.5 * fps), infoN = Math.round(2 * fps), total = nVid + holdN + infoN;
+  const enc = await makeEncoder(w, h, fps);
+  if (!enc) return null;
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const o = c.getContext('2d');
+  const plain = document.createElement('canvas'); plain.width = w; plain.height = h; const po = plain.getContext('2d');
+  const ca = Math.cos(al), sa = Math.sin(al);
+  const proj = P => { const X = B[0] + P[0], Y = B[1] + P[1], Z = B[2] + P[2], Yc = Y * ca - Z * sa, Zc = Y * sa + Z * ca;
+    return Zc < 0.3 ? null : [(cx + f * X / Zc) * sc, (cy - f * Yc / Zc) * sc]; };
+  const dt = 0.005, tEnd = fl.zeit;
+  const pts = []; fl.pts.forEach((P, k) => { const q = proj(P); if (q) pts.push({ t: Math.min(k * dt, tEnd), q }); });
+  const lw = Math.max(4, w / 110);
+  const zeichneBahn = tMax => {
+    const sel = pts.filter(p => p.t <= tMax); if (sel.length < 2) return;
+    const linie = () => { o.beginPath(); sel.forEach((p, i) => i ? o.lineTo(p.q[0], p.q[1]) : o.moveTo(p.q[0], p.q[1])); o.stroke(); };
+    o.lineCap = 'round'; o.lineJoin = 'round';
+    o.strokeStyle = 'rgba(240,138,36,0.35)'; o.lineWidth = lw * 2.6; linie();
+    o.strokeStyle = '#F08A24'; o.lineWidth = lw; linie();
+    o.strokeStyle = 'rgba(255,240,215,0.9)'; o.lineWidth = lw * 0.35; linie();
+    const e = sel[sel.length - 1].q; o.fillStyle = '#FFFFFF'; o.beginPath(); o.arc(e[0], e[1], lw * 0.75, 0, Math.PI * 2); o.fill();
+  };
+  const th = fit.p[0] * 180 / Math.PI, ph = fit.p[1] * 180 / Math.PI;
+  const v = (g.vF || fit.p[2]) * 3.6;
+  const zeilen = [`Abschuss ${de(th)}°`, `Richtung ${de(Math.abs(ph))}° ${Math.abs(ph) < 0.05 ? 'gerade' : (ph > 0 ? 'rechts' : 'links')}`,
+    `Ballspeed ${de(v, 0)} km/h${g.vF ? '' : ' (Bild)'}`, `Carry ca. ${de(fl.carry, 0)} m`];
+  const werteKasten = alpha => {
+    const fs = Math.round(w / 17), pad = Math.round(fs * 0.6), bh = pad * 2 + zeilen.length * fs * 1.25, bw = Math.round(w * 0.62);
+    const x = Math.round((w - bw) / 2), y = Math.round(h * 0.08);
+    o.globalAlpha = alpha; o.fillStyle = 'rgba(17,24,20,0.82)'; o.fillRect(x, y, bw, bh);
+    o.fillStyle = '#F08A24'; o.fillRect(x, y, Math.max(4, w / 160), bh);
+    o.fillStyle = '#FFFFFF'; o.font = `700 ${fs}px "Barlow Condensed", "Arial Narrow", system-ui, sans-serif`; o.textBaseline = 'top';
+    zeilen.forEach((z, i) => o.fillText(z, x + pad * 1.3, y + pad + i * fs * 1.25));
+    o.globalAlpha = 1;
+  };
+  const marke = () => { const fs = Math.round(w / 34); o.font = `600 ${fs}px Barlow, system-ui, sans-serif`; o.fillStyle = 'rgba(255,255,255,0.8)';
+    o.textBaseline = 'bottom'; o.fillText('Birdino Ballspur', fs * 0.8, h - fs * 0.8); };
+  const tLast = (n1 - out.treff + 0.5) / fpsReal;
+  for (let i = 0; i < total; i++) {
+    if (i < nVid) {
+      const n = n0 + i; await seekFrame(n);
+      o.drawImage(video, 0, 0, w, h);
+      if (i === nVid - 1) po.drawImage(video, 0, 0, w, h);
+      const t = (n - out.treff + 0.5) / fpsReal; if (t > 0) zeichneBahn(t);
+    } else {
+      o.drawImage(plain, 0, 0);
+      const k = i - nVid, p = Math.min(1, k / holdN), e = 1 - Math.pow(1 - p, 3);
+      zeichneBahn(tLast + (tEnd - tLast) * e);
+      if (k >= holdN) werteKasten(Math.min(1, (k - holdN) / 8));
+    }
+    marke();
+    await enc.add(c, i);
+    if (onProg && i % 3 === 0) onProg(i / total);
+  }
+  return await enc.finish();
+}
+
+let aktVideo = null, aktBild = null;
+async function makeAndSave(g) {
+  const tv = $('tracerVid');
+  aktVideo = null; $('shareVid').disabled = true; tv.hidden = true;
+  if (tv.src) { URL.revokeObjectURL(tv.src); tv.removeAttribute('src'); }
+  const th = g.fit.p[0] * 180 / Math.PI, ph = g.fit.p[1] * 180 / Math.PI;
+  const werte = { abschuss: th, richtung: ph, speed: (g.vF || g.fit.p[2]) * 3.6, speedRadar: !!g.vF, carry: g.fl.carry, seite: g.fl.side, scheitel: g.fl.apex };
+  aktBild = await (await fetch($('tracerImg').src)).blob();
+  let id = null;
+  try { id = await DB.put({ datum: Date.now(), werte, details: lastText, bild: aktBild, video: null }); renderShots(); } catch (e) {}
+  busy = true; enable(false);
+  try {
+    status('Erstelle das Tracer-Video …');
+    const vb = await tracerVideo(g, p => progress(p));
+    progress(null);
+    if (vb) {
+      aktVideo = vb; tv.src = URL.createObjectURL(vb); tv.hidden = false; $('shareVid').disabled = false;
+      tv.play().catch(() => {});
+      if (id != null) { const rec = await DB.get(id); if (rec) { rec.video = vb; await DB.put(rec); } renderShots(); }
+      status('Fertig – Video, Bild und Werte sind unter „Meine Schläge“ gespeichert.');
+    } else status('Dieses Gerät kann kein Video erstellen. Bild und Werte sind gespeichert.');
+  } catch (e) {
+    progress(null); status('Das Video konnte nicht erstellt werden. Bild und Werte sind gespeichert.', true);
+  }
+  busy = false; enable(true); updateBallInfo(); await gotoFrame(cur);
+}
+
+$('shareVid').addEventListener('click', () => { if (aktVideo) teilen(aktVideo, `birdino-ballspur-${Date.now()}.${aktVideo.type.includes('mp4') ? 'mp4' : 'webm'}`); });
+$('shareImg').addEventListener('click', async () => { const b = aktBild || await (await fetch($('tracerImg').src)).blob(); teilen(b, `birdino-ballspur-${Date.now()}.jpg`); });
+
+const urls = [];
+async function renderShots() {
+  let list = [];
+  try { list = await DB.all(); } catch (e) {}
+  list.sort((a, b) => b.datum - a.datum);
+  urls.splice(0).forEach(u => URL.revokeObjectURL(u));
+  const box = $('shots'); box.textContent = ''; $('shotsEmpty').hidden = list.length > 0;
+  for (const s of list) {
+    const b = document.createElement('button'); b.className = 'shot';
+    const img = document.createElement('img'); img.alt = ''; const u = URL.createObjectURL(s.bild); urls.push(u); img.src = u;
+    const t = document.createElement('span');
+    const kopf = document.createElement('b'); kopf.textContent = datumText(s.datum) + (s.video ? ' · Video' : '');
+    t.append(kopf, document.createElement('br'), document.createTextNode(werteText(s.werte)));
+    b.append(img, t); b.addEventListener('click', () => openShot(s.id)); box.append(b);
+  }
+}
+
+let dlgShot = null;
+async function openShot(id) {
+  const s = await DB.get(id); if (!s) return;
+  dlgShot = s;
+  $('dlgT').textContent = datumText(s.datum);
+  $('dlgW').textContent = werteText(s.werte) + ` · ${de(s.werte.speed, 0)} km/h${s.werte.speedRadar ? ' (Radar)' : ''}`;
+  $('dlgD').textContent = s.details || '';
+  const dv = $('dlgVid'), di = $('dlgImg');
+  if (dv.src) URL.revokeObjectURL(dv.src);
+  if (di.src) URL.revokeObjectURL(di.src);
+  if (s.video) { dv.src = URL.createObjectURL(s.video); dv.hidden = false; } else { dv.removeAttribute('src'); dv.hidden = true; }
+  di.src = URL.createObjectURL(s.bild);
+  $('shotDlg').showModal();
+  if (s.video) dv.play().catch(() => {});
+}
+$('dlgClose').addEventListener('click', () => { $('dlgVid').pause(); $('shotDlg').close(); });
+$('dlgShare').addEventListener('click', () => {
+  if (!dlgShot) return;
+  if (dlgShot.video) teilen(dlgShot.video, `birdino-ballspur-${dlgShot.datum}.${dlgShot.video.type.includes('mp4') ? 'mp4' : 'webm'}`);
+  else teilen(dlgShot.bild, `birdino-ballspur-${dlgShot.datum}.jpg`);
+});
+$('dlgDel').addEventListener('click', async () => {
+  if (!dlgShot || !confirm('Diesen Schlag löschen?')) return;
+  await DB.del(dlgShot.id); $('dlgVid').pause(); $('shotDlg').close(); renderShots();
+});
+renderShots();
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
