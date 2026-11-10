@@ -357,16 +357,24 @@ async function analyse(o) {
     if (nb) for (let q = 0; q < 3; q++) ballRGB[q] /= nb; }
   const rw = Math.max(2, Math.round(d0)), rx0 = Math.round(cx0 - rw / 2) - x0, ry0 = Math.round(cy0 - rw / 2) - y0;
   // Treffmoment-Suche nur im kleinen Ballbereich (schnell); grabRoi liefert rw*rw Grauwerte
-  const roiOf = g => { const r = new Float32Array(rw * rw); for (let y = 0; y < rw; y++) for (let x = 0; x < rw; x++) r[y * rw + x] = g[(y + ry0) * cw + (x + rx0)]; return r; };
-  const small = o.grabRoi ? n => o.grabRoi(n, Math.round(cx0 - rw / 2), Math.round(cy0 - rw / 2), rw) : async n => roiOf((await grab(n)).g);
+  // Der Ausschnitt enthaelt erst die Helligkeit, dann (falls vorhanden) den Farbkanal: ein Ball im Schatten ist
+  // oft kaum heller als der Rasen, hebt sich aber in der Farbe ab.
+  const roiOf = fr_ => { const nn = rw * rw, r = new Float32Array(fr_.h ? 2 * nn : nn);
+    for (let y = 0; y < rw; y++) for (let x = 0; x < rw; x++) { const q = (y + ry0) * cw + (x + rx0); r[y * rw + x] = fr_.g[q]; if (fr_.h) r[nn + y * rw + x] = fr_.h[q]; }
+    return r; };
+  const small = o.grabRoi ? n => o.grabRoi(n, Math.round(cx0 - rw / 2), Math.round(cy0 - rw / 2), rw) : async n => roiOf(await grab(n));
+  // mittlere Aenderung gegenueber dem Startbild: Helligkeit oder Farbe, je nachdem was groesser ist
+  const roiDiff = (r, r0) => { const nn = rw * rw; let s1 = 0, s2 = 0;
+    for (let k = 0; k < nn; k++) s1 += Math.abs(r[k] - r0[k]);
+    if (r.length >= 2 * nn && r0.length >= 2 * nn) for (let k = nn; k < 2 * nn; k++) s2 += Math.abs(r[k] - r0[k]);
+    return Math.max(s1, s2) / nn; };
   const refR = await small(start);
   let i = start, diffs = [], treff = o.seed ? o.treff : null;
   const maxSearch = o.seed ? i : Math.min(nFrames - 1, start + 900);
   while (i < maxSearch) {
     i++;
     const r = await small(i);
-    let s = 0; for (let k = 0; k < r.length; k++) s += Math.abs(r[k] - refR[k]);
-    const d = s / r.length; diffs.push(d);
+    const d = roiDiff(r, refR); diffs.push(d);
     onProgress && onProgress('treff', i - start, maxSearch - start);
     if (diffs.length > 5) {
       const b = diffs.slice(0, 5), mean = b.reduce((p, q) => p + q, 0) / 5;
@@ -375,8 +383,7 @@ async function analyse(o) {
       if (d > thr) {
         // Bestaetigen: liegt der Ball 16 Bilder spaeter wieder da, war es Schatten, Probeschwung oder Schlaeger davor
         const sp = await small(Math.min(nFrames - 1, i + 16));
-        let s2 = 0; for (let k = 0; k < sp.length; k++) s2 += Math.abs(sp[k] - refR[k]);
-        if (s2 / sp.length > thr) { treff = i; break; }
+        if (roiDiff(sp, refR) > thr) { treff = i; break; }
       }
     }
   }
@@ -424,22 +431,25 @@ async function analyse(o) {
       let sr = 0, sg = 0, sb = 0; for (const q of c.pix) { sr += fr.img.data[q * 4]; sg += fr.img.data[q * 4 + 1]; sb += fr.img.data[q * 4 + 2]; }
       const np = c.pix.length || 1, farbAbst = Math.hypot(sr / np - ballRGB[0], sg / np - ballRGB[1], sb / np - ballRGB[2]);
       const wieBall = mx >= hell * ballMax0 || farbAbst < 70;   // so hell oder so gefaerbt wie der ruhende Ball
-      if (k < 8 && !wieBall) continue;
+      // Nicht mehr hart aussortieren: wechselt der Ball zwischen Schatten und Sonne, sieht er anders aus als in Ruhe.
+      // Die Helligkeit gilt nur im ersten Durchgang der Spurwahl (siehe unten).
       cands.push({ x, y, d: c.dm, rund, bright: wieBall, patch: mkPatch(x, y, c.dm, fr.img) });
     }
-    cands.sort((p, q) => q.rund - p.rund); if (cands.length > 40) cands.length = 40;
+    cands.sort((p, q) => (q.bright - p.bright) || (q.rund - p.rund)); if (cands.length > 60) cands.length = 60;
     frames.push({ f: i, cands });
   }
   // 2) Von einem Startfleck aus verfolgen; der Ball fliegt lange und gleichmaessig,
   //    der Schlaeger verschwindet nach wenigen Bildern seitlich
-  const follow = (k0, c0) => {
+  const follow = (k0, c0, nurHell) => {
     const tr = [{ f: frames[k0].f, ...c0 }], nf = Math.max(1, frames[k0].f - treff);
     let last = c0, dl = c0.d, vel = [(c0.x - cx0) / nf, (c0.y - cy0) / nf], miss = 0, err = 0;
     for (let k = k0 + 1; k < frames.length; k++) {
       const q = miss + 1, pred = [last.x + vel[0] * q, last.y + vel[1] * q];
       const rad = Math.max(3 * dl, 0.5 * Math.hypot(vel[0], vel[1]) + 2 * dl) * q;
       let best = null;
+      const frueh = nurHell && frames[k].f - treff <= 8;   // solange der Schlaeger in der Naehe ist
       for (const c of frames[k].cands) {
+        if (frueh && c.bright === false) continue;
         if (c.d > 1.15 * dl + 2 || c.d < 0.55 * dl - 1) continue;
         const dist = Math.hypot(c.x - pred[0], c.y - pred[1]);
         if (dist > rad) continue;
@@ -460,16 +470,38 @@ async function analyse(o) {
       for (let k = 1; k < m - 1; k++) bend = Math.max(bend, Math.abs((p1.x - p0.x) * (p0.y - tr[k].y) - (p0.x - tr[k].x) * (p1.y - p0.y)) / L);
     }
     const krumm = bend > Math.max(3, 0.12 * d0);
-    return { tr, err: err / tr.length, wert: krumm ? tr.length / 2 : tr.length };
+    // Fuehrt die Spur zur Ruhestelle zurueck? Der Ball startet dort und fliegt im Bild anfangs gerade:
+    // die Gerade durch die ersten Punkte muss nah an der Ruhestelle vorbeigehen (unabhaengig von Licht und Zeit).
+    let neben = 0;
+    const mq = Math.min(6, tr.length);
+    if (mq >= 3) {
+      let mx = 0, my = 0; for (let k = 0; k < mq; k++) { mx += tr[k].x; my += tr[k].y; } mx /= mq; my /= mq;
+      let sxx = 0, syy = 0, sxy = 0; for (let k = 0; k < mq; k++) { const dx = tr[k].x - mx, dy = tr[k].y - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+      const wi = 0.5 * Math.atan2(2 * sxy, sxx - syy), ex = Math.cos(wi), ey = Math.sin(wi);
+      neben = Math.abs(-(cx0 - mx) * ey + (cy0 - my) * ex);
+    }
+    const zurueck = neben <= d0 + 3;
+    let wert = tr.length; if (krumm) wert /= 2; if (!zurueck) wert /= 4;
+    return { tr, err: err / tr.length, wert, zurueck, krumm };
   };
-  let bestT = null;
+  // Spurwahl in zwei Durchgaengen:
+  // 1) wie bisher - Startfleck und fruehe Punkte muessen hell oder ballfarben sein (haelt den Schlaegerkopf fern);
+  // 2) nur wenn das keine gute Spur ergibt (Ball wechselt zwischen Schatten und Sonne): ohne Helligkeitspruefung,
+  //    es entscheidet allein, ob die Spur lang und gerade ist und zur Ruhestelle zurueckfuehrt.
   const kMax = o.seed ? 1 : Math.min(frames.length, 16);
-  for (let k = 0; k < kMax; k++) for (const c of frames[k].cands) {
-    // Startfleck muss hell sein wie der ruhende Ball: kurz nach dem Treffer ist der Ball noch
-    // vor Boden/Matte und wirkt hell, der Schlaegerkopf dagegen dunkel
-    if (!o.seed && !c.bright) continue;
-    const r = follow(k, c);
-    if (!bestT || r.wert > bestT.wert || (r.wert === bestT.wert && r.err < bestT.err)) bestT = r;
+  const waehle = nurHell => {
+    let b = null;
+    for (let k = 0; k < kMax; k++) for (const c of frames[k].cands) {
+      if (nurHell && !o.seed && !c.bright) continue;
+      const r = follow(k, c, nurHell);
+      if (!b || r.wert > b.wert || (r.wert === b.wert && r.err < b.err)) b = r;
+    }
+    return b;
+  };
+  let bestT = waehle(true), ohneHell = false;
+  if (!o.seed && !(bestT && bestT.wert >= 8 && bestT.zurueck && !bestT.krumm)) {
+    const b2 = waehle(false);
+    if (b2 && (!bestT || b2.wert > 1.25 * bestT.wert)) { bestT = b2; ohneHell = true; }
   }
   let winRawG = null, dRawG = null;
   // 3) Spur verlaengern: Feinsuche dort, wo der Ball laut berechneter Bahn sein muss.
@@ -488,8 +520,22 @@ async function analyse(o) {
       return r instanceof Float32Array ? { l: r, c: null } : r;
     };
     // Unterschied zum Startbild: Helligkeit oder Farbe, je nachdem was groesser ist
-    const dRaw = (r, i, j) => r.c ? Math.max(Math.abs(r.l[i] - refRaw[j]), Math.abs(r.c[i] - refC[j])) : Math.abs(r.l[i] - refRaw[j]);
-    winRawG = winRaw; dRawG = dRaw;
+    // Aendert sich das Licht gegenueber dem Startbild (Wolke, Belichtung), ist das ganze Fenster verschoben:
+    // der Median der Differenz im Fenster wird vorher abgezogen, getrennt fuer Helligkeit und Farbe.
+    const medOf = (r, ref, wx, wy, ws) => {
+      const st = Math.max(1, Math.floor(ws / 45)), v = [];
+      for (let y = 0; y < ws; y += st) for (let x = 0; x < ws; x += st) v.push(r[y * ws + x] - ref[(y + wy - y0) * cw + (x + wx - x0)]);
+      v.sort((p, q) => p - q); return v[v.length >> 1];
+    };
+    const difFenster = (r, wx, wy, ws) => {
+      const dif = new Float32Array(ws * ws), ml = medOf(r.l, refRaw, wx, wy, ws), mc = r.c ? medOf(r.c, refC, wx, wy, ws) : 0;
+      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) {
+        const i = y * ws + x, j = (y + wy - y0) * cw + (x + wx - x0), a = Math.abs(r.l[i] - refRaw[j] - ml);
+        dif[i] = r.c ? Math.max(a, Math.abs(r.c[i] - refC[j] - mc)) : a;
+      }
+      return dif;
+    };
+    winRawG = winRaw; dRawG = difFenster;
     const a = tr[tr.length - 1], b = tr[Math.max(0, tr.length - 4)];
     let vel = [(a.x - b.x) / Math.max(1, a.f - b.f), (a.y - b.y) / Math.max(1, a.f - b.f)];
     let last = a, dl = a.d, fN = a.f, miss = 0, pred = null, sinceFit = 99, stillN = 0;
@@ -503,8 +549,7 @@ async function analyse(o) {
       const rr = Math.max(5, 1.5 * dl + 2 * miss + (mp ? 0 : 0.5 * Math.hypot(vel[0], vel[1])));
       const ws = Math.min(160, Math.round(2 * rr + 10));
       const wx = Math.max(x0, Math.min(x0 + cw - ws, Math.round(px - ws / 2))), wy = Math.max(y0, Math.min(y0 + ch - ws, Math.round(py - ws / 2)));
-      const r = await winRaw(fN, wx, wy, ws), dif = new Float32Array(ws * ws);
-      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) dif[y * ws + x] = dRaw(r, y * ws + x, (y + wy - y0) * cw + (x + wx - x0));
+      const r = await winRaw(fN, wx, wy, ws), dif = difFenster(r, wx, wy, ws);
       const srt = Array.from(dif).sort((u, v) => u - v), med = srt[srt.length >> 1], noise = Math.max(2, 1.48 * med);
       let pk = -1, pv = 0;
       for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) {
@@ -556,14 +601,14 @@ async function analyse(o) {
       const by0 = Math.max(y0, Math.floor(Math.min(cy0, first.y) - breite)), by1 = Math.min(y0 + ch, Math.ceil(Math.max(cy0, first.y) + breite));
       const ws = Math.max(bx1 - bx0, by1 - by0); if (ws < 8 || ws > 900) break;
       const wx = Math.max(x0, Math.min(x0 + cw - ws, bx0)), wy = Math.max(y0, Math.min(y0 + ch - ws, by0));
-      const r = await winRaw(fB, wx, wy, ws), dif = new Float32Array(ws * ws), inK = new Uint8Array(ws * ws);
+      const r = await winRaw(fB, wx, wy, ws), difAll = difFenster(r, wx, wy, ws), dif = new Float32Array(ws * ws), inK = new Uint8Array(ws * ws);
       let pk = -1, pv = 0; const vals = [];
       for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) {
         const gx = x + wx, gy = y + wy, i = y * ws + x;
         const s_ = (gx - cx0) * ex + (gy - cy0) * ey, perp = Math.abs(-(gx - cx0) * ey + (gy - cy0) * ex);
         if (s_ < 0.7 * d0 || s_ > L - 0.3 * first.d || perp > breite) continue;   // nur im Korridor, nicht auf der Ruhestelle
         inK[i] = 1;
-        const v = dRaw(r, i, (gy - y0) * cw + (gx - x0)); dif[i] = v; vals.push(v);
+        const v = difAll[i]; dif[i] = v; vals.push(v);
         if (v > pv) { pv = v; pk = i; }
       }
       onProgress && onProgress('ext', -(first.f - fB), 0);
@@ -597,8 +642,7 @@ async function analyse(o) {
       if (p.d < 5) continue;
       const ws = Math.min(220, Math.round(3 * p.d + 14));
       const wx = Math.max(x0, Math.min(x0 + cw - ws, Math.round(p.x - ws / 2))), wy = Math.max(y0, Math.min(y0 + ch - ws, Math.round(p.y - ws / 2)));
-      const r = await winRawG(p.f, wx, wy, ws), dif = new Float32Array(ws * ws);
-      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) dif[y * ws + x] = dRawG(r, y * ws + x, (y + wy - y0) * cw + (x + wx - x0));
+      const r = await winRawG(p.f, wx, wy, ws), dif = dRawG(r, wx, wy, ws);
       let pk = -1, pv = 0;
       for (let y = 1; y < ws - 1; y++) for (let x = 1; x < ws - 1; x++) {
         if (Math.hypot(x + wx - p.x, y + wy - p.y) > p.d / 2 + 3) continue;
@@ -626,7 +670,7 @@ async function analyse(o) {
   }
   const track = bestT ? bestT.tr.map(p => ({ f: p.f, x: p.x, y: p.y, d: p.d })) : [];
   const patches = bestT ? bestT.tr.map(p => p.patch).filter(Boolean) : [];
-  return { treff, track, base, patches };
+  return { treff, track, base, patches, ohneHell };
 }
 
 function projiziere(P, f, cx, cy, al) {
@@ -1239,8 +1283,8 @@ async function runAnalysis(seed) {
       await seekFrame(n);
       const m = 4, sz = rw + 2 * m; roiC.width = sz; roiC.height = sz;
       roiX.drawImage(video, rx - m, ry - m, sz, sz, 0, 0, sz, sz);
-      const g = blurGray(roiX.getImageData(0, 0, sz, sz).data, sz, sz), r = new Float32Array(rw * rw);
-      for (let y = 0; y < rw; y++) for (let x = 0; x < rw; x++) r[y * rw + x] = g[(y + m) * sz + x + m];
+      const px = roiX.getImageData(0, 0, sz, sz).data, g = blurGray(px, sz, sz), hc = blurChroma(px, sz, sz), nn = rw * rw, r = new Float32Array(2 * nn);
+      for (let y = 0; y < rw; y++) for (let x = 0; x < rw; x++) { r[y * rw + x] = g[(y + m) * sz + x + m]; r[nn + y * rw + x] = hc[(y + m) * sz + x + m]; }
       return r;
     };
     // Brennweite: mit gemessenem Abstand aus dem ruhenden Ball kalibrieren, sonst aus dem Bildwinkel;
@@ -1344,7 +1388,7 @@ async function runAnalysis(seed) {
     `Kamera: ${de(abstand, 2)} m hinter Ball (${abQuelle}), ${de(hoehe, 2)} m hoch`,
     `Startbild ${ball.frame}, Ball bei (${Math.round(cx0)}, ${Math.round(cy0)}), ${Math.round(d0)} px`,
     `Treffmoment: Bild ${out.treff}`,
-    `Ball gefunden in ${out.track.length} Bildern`,
+    `Ball gefunden in ${out.track.length} Bildern${out.ohneHell ? ' (Spurwahl ohne Helligkeitspruefung: Ball sieht im Flug anders aus als in Ruhe)' : ''}`,
     `Kamera-Neigung (berechnet): ${al >= 0 ? '+' : ''}${de(al * 180 / Math.PI)} Grad`,
     `STARTRICHTUNG: ${de(Math.abs(ph))} Grad ${ph > 0 ? 'rechts' : 'links'}`,
     `ABSCHUSSWINKEL: ${de(th)} Grad`,
