@@ -174,7 +174,7 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
 <section>
   <details id="bildDetails">
     <summary class="h2sum">Bild, Ball und Abschlagzone</summary>
-    <p class="hint">Findet die App den Ball nicht selbst: Bild wählen, auf den Ball tippen, „Ball verfolgen“. Liegen mehrere Bälle im Bild, einmal die Abschlagzone festlegen.</p>
+    <p class="hint">Findet die App den Ball nicht selbst: Bild wählen, auf den Ball tippen, „Ball verfolgen“. Zum Feinjustieren das Kreuz mit dem Finger verschieben – eine Lupe zeigt die Stelle vergrößert. Liegen mehrere Bälle im Bild, einmal die Abschlagzone festlegen.</p>
   <div class="frame">
     <canvas id="view" width="9" height="16"></canvas>
     <div class="empty" id="empty">Noch kein Video geladen</div>
@@ -228,6 +228,9 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
   <h2><span class="n">3</span>Meine Schläge</h2>
   <div id="shots"></div>
   <p class="hint" id="shotsEmpty">Noch keine Schläge gespeichert.</p>
+  <p class="hint" id="speicher"></p>
+  <div class="row"><button id="delVids">Alle Videos löschen</button><button id="delAll">Alles löschen</button></div>
+  <p class="hint">„Alle Videos löschen“ behält Bilder und Werte. Die Original-Zeitlupen in der Fotos-App bleiben unberührt, die löschst du dort.</p>
 </section>
 
 <dialog id="shotDlg">
@@ -237,7 +240,7 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
     <img id="dlgImg" alt="Flugbahn des Schlags">
     <p id="dlgW"></p>
     <details><summary>Details</summary><pre id="dlgD"></pre></details>
-    <div class="row"><button id="dlgShare">Teilen</button><button id="dlgDel">Löschen</button><button class="primary" id="dlgClose">Schließen</button></div>
+    <div class="row"><button id="dlgShare">Teilen</button><button id="dlgDelVid">Nur Video löschen</button><button id="dlgDel">Schlag löschen</button><button class="primary" id="dlgClose">Schließen</button></div>
   </div>
 </dialog>
 </main>
@@ -268,6 +271,26 @@ function blurGray(rgba, w, h) {
     }
   }
   return out;
+}
+
+// Zweiter Kanal fuer Farbunterschiede (gelb/weiss gegen Himmel, Gras, Matte), unabhaengig von der Helligkeit
+function blurChroma(rgba, w, h) {
+  const n = w * h, c = new Uint8ClampedArray(n * 4);
+  for (let i = 0, j = 0; i < n; i++, j += 4) { const v = 128 + 0.5 * (rgba[j] - rgba[j + 2]); c[j] = c[j + 1] = c[j + 2] = v; }
+  return blurGray(c, w, h);
+}
+const chr = (d, i) => 128 + 0.5 * (d[i] - d[i + 2]);
+
+// Durchmesser aus den zweiten Momenten eines Flecks (kurze Achse). Fuer eine Scheibe gilt d = 4*sigma.
+// Ein verwischter Ball (Strich) hat quer zur Bewegung eine breitere Verteilung als eine Scheibe und wuerde
+// bis zu 15 % zu gross gemessen; der Faktor haengt vom Achsenverhaeltnis ab (numerisch bestimmt).
+function kurzAchse(sxx, syy, sxy) {
+  const m = (sxx + syy) / 2, w = Math.sqrt(((sxx - syy) / 2) ** 2 + sxy * sxy);
+  const lmin = Math.max(m - w, 0), lmax = m + w;
+  if (lmin <= 0) return 1;
+  const rho = Math.sqrt(lmax / lmin);
+  const k = rho > 1.2 ? 1 + 0.1547 * (1 - Math.pow(rho, -1.3)) : 1;
+  return Math.max(1, 4 * Math.sqrt(lmin) / k + 0.5);
 }
 
 function openMask(m, w, h) {
@@ -302,8 +325,11 @@ function components(m, w, h, minA, maxA) {
     if (a < minA || a > maxA) continue;
     const cx = sx / a, cy = sy / a;
     let r2 = 0;
-    for (const p of pix) { const dx = p % w - cx, dy = ((p / w) | 0) - cy, q = dx * dx + dy * dy; if (q > r2) r2 = q; }
-    res.push({ a, x: cx, y: cy, r: Math.sqrt(r2) + 0.5, pix: pix.slice() });
+    let sxx = 0, syy = 0, sxy = 0;
+    for (const p of pix) { const dx = p % w - cx, dy = ((p / w) | 0) - cy, q = dx * dx + dy * dy; if (q > r2) r2 = q; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+    // kurze Achse des Flecks: bei einem verwischten Ball (Strich) ist das der echte Durchmesser
+    sxx /= a; syy /= a; sxy /= a;
+    res.push({ a, x: cx, y: cy, r: Math.sqrt(r2) + 0.5, dm: kurzAchse(sxx, syy, sxy), pix: pix.slice() });
   }
   return res;
 }
@@ -322,6 +348,13 @@ async function analyse(o) {
       const xx = x - x0, yy = y - y0; if (xx < 0 || yy < 0 || xx >= cw || yy >= ch) continue;
       const L = lum(sfr.img.data, (yy * cw + xx) * 4); if (L > ballMax0) ballMax0 = L; } }
   const hell = o.hell == null ? 0.7 : o.hell;
+  // mittlere Farbe des ruhenden Balls (fuer den Vergleich, wenn er nicht der hellste Fleck ist)
+  const ballRGB = [0, 0, 0];
+  { let nb = 0; const rr = Math.max(1, d0 / 3);
+    for (let y = Math.round(cy0 - rr); y <= Math.round(cy0 + rr); y++) for (let x = Math.round(cx0 - rr); x <= Math.round(cx0 + rr); x++) {
+      const xx = x - x0, yy = y - y0; if (xx < 0 || yy < 0 || xx >= cw || yy >= ch) continue;
+      const j = (yy * cw + xx) * 4; ballRGB[0] += sfr.img.data[j]; ballRGB[1] += sfr.img.data[j + 1]; ballRGB[2] += sfr.img.data[j + 2]; nb++; }
+    if (nb) for (let q = 0; q < 3; q++) ballRGB[q] /= nb; }
   const rw = Math.max(2, Math.round(d0)), rx0 = Math.round(cx0 - rw / 2) - x0, ry0 = Math.round(cy0 - rw / 2) - y0;
   // Treffmoment-Suche nur im kleinen Ballbereich (schnell); grabRoi liefert rw*rw Grauwerte
   const roiOf = g => { const r = new Float32Array(rw * rw); for (let y = 0; y < rw; y++) for (let x = 0; x < rw; x++) r[y * rw + x] = g[(y + ry0) * cw + (x + rx0)]; return r; };
@@ -338,13 +371,20 @@ async function analyse(o) {
     if (diffs.length > 5) {
       const b = diffs.slice(0, 5), mean = b.reduce((p, q) => p + q, 0) / 5;
       const std = Math.sqrt(b.reduce((p, q) => p + (q - mean) ** 2, 0) / 5);
-      if (d > Math.max(12, mean + 6 * std + 3)) { treff = i; break; }
+      const thr = Math.max(12, mean + 6 * std + 3);
+      if (d > thr) {
+        // Bestaetigen: liegt der Ball 16 Bilder spaeter wieder da, war es Schatten, Probeschwung oder Schlaeger davor
+        const sp = await small(Math.min(nFrames - 1, i + 16));
+        let s2 = 0; for (let k = 0; k < sp.length; k++) s2 += Math.abs(sp[k] - refR[k]);
+        if (s2 / sp.length > thr) { treff = i; break; }
+      }
     }
   }
   if (treff === null) return { error: 'treff' };
   const base = (await grab(Math.max(start, treff - 3))).img;
   const i0 = o.seed ? o.seed.f : treff;
-  let fr = await grab(i0), prev = fr.g;
+  let fr = await grab(i0), prev = fr.g, prevH = fr.h;
+  const refH = sfr.h;
   i = i0;
   const mkPatch = (x, y, d, img) => {
     const pr = Math.max(3, Math.ceil(d * 0.7)), px = Math.round(x - x0), py = Math.round(y - y0);
@@ -359,25 +399,33 @@ async function analyse(o) {
   // 1) In jedem Bild nach dem Treffer alle ballaehnlichen Flecken sammeln
   const frames = [];
   if (o.seed) frames.push({ f: i0, cands: [{ x: o.seed.x, y: o.seed.y, d: Math.min(d0, Math.max(3, o.seed.d)), rund: 1, patch: mkPatch(o.seed.x, o.seed.y, o.seed.d, fr.img) }] });
-  const dmax = 1.15 * d0 + 2;
+  const dmax = 1.5 * d0 + 4;   // grosszuegig: der markierte Durchmesser kann etwas zu klein sein
   for (let k = 0; k < maxB && i < nFrames - 1; k++) {
     i++; fr = await grab(i); const g = fr.g;
     onProgress && onProgress('spur', k + 1, maxB);
     const n = cw * ch, m = new Uint8Array(n);
-    for (let p = 0; p < n; p++) if (Math.abs(g[p] - ref[p]) > T && Math.abs(g[p] - prev[p]) > T) m[p] = 1;
-    prev = g;
+    const hh = fr.h;
+    for (let p = 0; p < n; p++) {
+      const a1 = Math.abs(g[p] - ref[p]), a2 = Math.abs(g[p] - prev[p]);
+      if (hh && refH && prevH) { if (Math.max(a1, Math.abs(hh[p] - refH[p])) > T && Math.max(a2, Math.abs(hh[p] - prevH[p])) > T) m[p] = 1; }
+      else if (a1 > T && a2 > T) m[p] = 1;
+    }
+    prev = g; prevH = hh;
     const cands = [];
     for (const c of components(openMask(m, cw, ch), cw, ch, 4, 3 * d0 * d0)) {
-      if (2 * c.r > dmax) continue;
+      if (c.dm > dmax) continue;
       const x = c.x + x0, y = c.y + y0;
       if (Math.hypot(x - cx0, y - cy0) < 0.8 * d0 || y > cy0 + d0) continue;
-      const rund = c.a / (Math.PI * c.r * c.r + 1e-6);
-      if (rund < 0.25) continue;
+      const rund = Math.min(1, c.a / (Math.PI * (c.dm / 2) * c.r + 1e-6));
+      if (rund < 0.35) continue;
       let mx = 0; for (const q of c.pix) { const L = lum(fr.img.data, q * 4); if (L > mx) mx = L; }
       // Helligkeit nur in den ersten Bildern pruefen, solange der Schlaeger in der Naehe ist.
       // Spaeter kann der Ball vor hellem Himmel dunkler wirken als der Hintergrund.
-      if (k < 8 && mx < hell * ballMax0) continue;
-      cands.push({ x, y, d: 2 * c.r, rund, bright: mx >= hell * ballMax0, patch: mkPatch(x, y, 2 * c.r, fr.img) });
+      let sr = 0, sg = 0, sb = 0; for (const q of c.pix) { sr += fr.img.data[q * 4]; sg += fr.img.data[q * 4 + 1]; sb += fr.img.data[q * 4 + 2]; }
+      const np = c.pix.length || 1, farbAbst = Math.hypot(sr / np - ballRGB[0], sg / np - ballRGB[1], sb / np - ballRGB[2]);
+      const wieBall = mx >= hell * ballMax0 || farbAbst < 70;   // so hell oder so gefaerbt wie der ruhende Ball
+      if (k < 8 && !wieBall) continue;
+      cands.push({ x, y, d: c.dm, rund, bright: wieBall, patch: mkPatch(x, y, c.dm, fr.img) });
     }
     cands.sort((p, q) => q.rund - p.rund); if (cands.length > 40) cands.length = 40;
     frames.push({ f: i, cands });
@@ -423,21 +471,28 @@ async function analyse(o) {
     const r = follow(k, c);
     if (!bestT || r.wert > bestT.wert || (r.wert === bestT.wert && r.err < bestT.err)) bestT = r;
   }
+  let winRawG = null, dRawG = null;
   // 3) Spur verlaengern: Feinsuche dort, wo der Ball laut berechneter Bahn sein muss.
   //    Ungeglaettetes Bild, Vergleich mit dem Startbild, auch 1-2 Pixel kleine Baelle (heller oder dunkler).
   if (bestT && bestT.tr.length >= 6) {
     const tr = bestT.tr;
-    const refRaw = new Float32Array(cw * ch);
-    for (let k = 0, j = 0; k < cw * ch; k++, j += 4) refRaw[k] = lum(sfr.img.data, j);
+    const refRaw = new Float32Array(cw * ch), refC = new Float32Array(cw * ch);
+    for (let k = 0, j = 0; k < cw * ch; k++, j += 4) { refRaw[k] = lum(sfr.img.data, j); refC[k] = chr(sfr.img.data, j); }
     const winRaw = async (n, wx, wy, ws) => {
-      if (o.grabRaw) return await o.grabRaw(n, wx, wy, ws);
-      const im = (await grab(n)).img.data, r = new Float32Array(ws * ws);
-      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) r[y * ws + x] = lum(im, ((y + wy - y0) * cw + (x + wx - x0)) * 4);
-      return r;
+      let r;
+      if (o.grabRaw) r = await o.grabRaw(n, wx, wy, ws);
+      else {
+        const im = (await grab(n)).img.data; r = { l: new Float32Array(ws * ws), c: new Float32Array(ws * ws) };
+        for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) { const j = ((y + wy - y0) * cw + (x + wx - x0)) * 4; r.l[y * ws + x] = lum(im, j); r.c[y * ws + x] = chr(im, j); }
+      }
+      return r instanceof Float32Array ? { l: r, c: null } : r;
     };
+    // Unterschied zum Startbild: Helligkeit oder Farbe, je nachdem was groesser ist
+    const dRaw = (r, i, j) => r.c ? Math.max(Math.abs(r.l[i] - refRaw[j]), Math.abs(r.c[i] - refC[j])) : Math.abs(r.l[i] - refRaw[j]);
+    winRawG = winRaw; dRawG = dRaw;
     const a = tr[tr.length - 1], b = tr[Math.max(0, tr.length - 4)];
     let vel = [(a.x - b.x) / Math.max(1, a.f - b.f), (a.y - b.y) / Math.max(1, a.f - b.f)];
-    let last = a, dl = a.d, fN = a.f, miss = 0, pred = null, sinceFit = 99;
+    let last = a, dl = a.d, fN = a.f, miss = 0, pred = null, sinceFit = 99, stillN = 0;
     const maxF = Math.min(nFrames - 1, a.f + (o.maxExt || 300));
     while (fN < maxF && miss < 10) {
       fN++;
@@ -449,12 +504,14 @@ async function analyse(o) {
       const ws = Math.min(160, Math.round(2 * rr + 10));
       const wx = Math.max(x0, Math.min(x0 + cw - ws, Math.round(px - ws / 2))), wy = Math.max(y0, Math.min(y0 + ch - ws, Math.round(py - ws / 2)));
       const r = await winRaw(fN, wx, wy, ws), dif = new Float32Array(ws * ws);
-      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) dif[y * ws + x] = Math.abs(r[y * ws + x] - refRaw[(y + wy - y0) * cw + (x + wx - x0)]);
+      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) dif[y * ws + x] = dRaw(r, y * ws + x, (y + wy - y0) * cw + (x + wx - x0));
       const srt = Array.from(dif).sort((u, v) => u - v), med = srt[srt.length >> 1], noise = Math.max(2, 1.48 * med);
       let pk = -1, pv = 0;
       for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) {
-        const v = dif[y * ws + x]; if (v <= pv) continue;
-        if (Math.hypot(x + wx - px, y + wy - py) <= rr) { pv = v; pk = y * ws + x; }
+        const i0_ = y * ws + x;
+        const v = (y > 0 && y < ws - 1 && x > 0 && x < ws - 1) ? (2 * dif[i0_] + dif[i0_ - 1] + dif[i0_ + 1] + dif[i0_ - ws] + dif[i0_ + ws]) / 6 : dif[i0_];
+        if (v <= pv) continue;
+        if (Math.hypot(x + wx - px, y + wy - py) <= rr) { pv = v; pk = i0_; }
       }
       let best = null;
       if (pk >= 0 && pv > Math.max(6, med + 5 * noise)) {
@@ -475,6 +532,10 @@ async function analyse(o) {
       if (best && q === 1 && best.x === last.x && best.y === last.y && best.d === last.d) {
         // exakt dasselbe Bild wie zuvor (doppeltes Bild im umgewandelten Video): ueberspringen
       } else if (best) {
+        // Haengt die Suche an etwas Ruhendem fest (Mast, Netz, Lichtwechsel)? Dann ist der Ball verloren.
+        const bew = Math.hypot(best.x - last.x, best.y - last.y);
+        stillN = (q >= 3 && bew < 0.15 * q + 0.2) ? stillN + 1 : 0;
+        if (stillN >= 3) { tr.splice(tr.length - (stillN - 1)); break; }
         const nv = [(best.x - last.x) / q, (best.y - last.y) / q];
         vel = [0.6 * vel[0] + 0.4 * nv[0], 0.6 * vel[1] + 0.4 * nv[1]];
         last = { f: fN, x: best.x, y: best.y, d: best.d }; dl = Math.max(1.5, 0.7 * dl + 0.3 * best.d); miss = 0; sinceFit++;
@@ -483,32 +544,6 @@ async function analyse(o) {
     }
     // 4) Rueckwaerts: Bilder zwischen Treffer und erstem Fund nachtraeglich absuchen.
     //    Dort ist der Ball am groessten, aber oft verwischt und dicht am Schlaeger.
-    const fein = async (fN, px, py, rr, dl, dmax) => {
-      const ws = Math.min(200, Math.round(2 * rr + 10));
-      const wx = Math.max(x0, Math.min(x0 + cw - ws, Math.round(px - ws / 2))), wy = Math.max(y0, Math.min(y0 + ch - ws, Math.round(py - ws / 2)));
-      const r = await winRaw(fN, wx, wy, ws), dif = new Float32Array(ws * ws);
-      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) dif[y * ws + x] = Math.abs(r[y * ws + x] - refRaw[(y + wy - y0) * cw + (x + wx - x0)]);
-      const srt = Array.from(dif).sort((u, v) => u - v), med = srt[srt.length >> 1], noise = Math.max(2, 1.48 * med);
-      let pk = -1, pv = 0;
-      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) {
-        const v = dif[y * ws + x]; if (v <= pv) continue;
-        if (Math.hypot(x + wx - px, y + wy - py) <= rr && Math.hypot(x + wx - cx0, y + wy - cy0) > 0.7 * d0) { pv = v; pk = y * ws + x; }
-      }
-      if (pk < 0 || pv <= Math.max(10, med + 5 * noise)) return null;
-      const th = Math.max(med + 2 * noise, 0.4 * pv), seen = new Uint8Array(ws * ws), st = [pk]; seen[pk] = 1;
-      let sw = 0, sx = 0, sy = 0, n = 0;
-      while (st.length && n < 6 * dl * dl + 40) {
-        const p = st.pop(), x = p % ws, y = (p / ws) | 0, w = dif[p] - med; n++; sw += w; sx += w * x; sy += w * y;
-        for (const qq of [p - 1, p + 1, p - ws, p + ws]) {
-          if (qq < 0 || qq >= ws * ws || seen[qq]) continue;
-          if ((qq === p - 1 && x === 0) || (qq === p + 1 && x === ws - 1)) continue;
-          if (dif[qq] >= th) { seen[qq] = 1; st.push(qq); }
-        }
-      }
-      const d = Math.max(1.5, 2 * Math.sqrt(n / Math.PI));
-      if (sw <= 0 || d > dmax) return null;
-      return { x: wx + sx / sw, y: wy + sy / sw, d };
-    };
     // Rueckwaerts im Korridor zwischen Ruhestelle und erstem Fund suchen: der Ball liegt dort auf
     // (fast) einer Geraden; sein Tempo im Bild ist nah an der Kamera aber viel hoeher als spaeter.
     tr.sort((p, q) => p.f - q.f);
@@ -528,7 +563,7 @@ async function analyse(o) {
         const s_ = (gx - cx0) * ex + (gy - cy0) * ey, perp = Math.abs(-(gx - cx0) * ey + (gy - cy0) * ex);
         if (s_ < 0.7 * d0 || s_ > L - 0.3 * first.d || perp > breite) continue;   // nur im Korridor, nicht auf der Ruhestelle
         inK[i] = 1;
-        const v = Math.abs(r[i] - refRaw[(gy - y0) * cw + (gx - x0)]); dif[i] = v; vals.push(v);
+        const v = dRaw(r, i, (gy - y0) * cw + (gx - x0)); dif[i] = v; vals.push(v);
         if (v > pv) { pv = v; pk = i; }
       }
       onProgress && onProgress('ext', -(first.f - fB), 0);
@@ -553,6 +588,40 @@ async function analyse(o) {
       }
       if (best) { tr.unshift({ f: fB, x: best.x, y: best.y, d: best.d, patch: null }); first = tr[0]; missB = 0; }
       else missB++;
+    }
+  }
+  // 5) Einheitlich nachmessen: Durchmesser (kurze Achse) aller groesseren Punkte mit demselben Verfahren,
+  //    damit der Fit keine Spruenge zwischen verschiedenen Messarten als Tiefe deutet.
+  if (bestT && bestT.tr.length >= 6 && typeof winRawG === 'function') {
+    for (const p of bestT.tr) {
+      if (p.d < 5) continue;
+      const ws = Math.min(220, Math.round(3 * p.d + 14));
+      const wx = Math.max(x0, Math.min(x0 + cw - ws, Math.round(p.x - ws / 2))), wy = Math.max(y0, Math.min(y0 + ch - ws, Math.round(p.y - ws / 2)));
+      const r = await winRawG(p.f, wx, wy, ws), dif = new Float32Array(ws * ws);
+      for (let y = 0; y < ws; y++) for (let x = 0; x < ws; x++) dif[y * ws + x] = dRawG(r, y * ws + x, (y + wy - y0) * cw + (x + wx - x0));
+      let pk = -1, pv = 0;
+      for (let y = 1; y < ws - 1; y++) for (let x = 1; x < ws - 1; x++) {
+        if (Math.hypot(x + wx - p.x, y + wy - p.y) > p.d / 2 + 3) continue;
+        const i = y * ws + x, v = (dif[i] + dif[i - 1] + dif[i + 1] + dif[i - ws] + dif[i + ws]) / 5;
+        if (v > pv) { pv = v; pk = i; }
+      }
+      if (pk < 0 || pv < 12) continue;
+      const th = 0.5 * pv, seen = new Uint8Array(ws * ws), st = [pk]; seen[pk] = 1;
+      let n = 0, sx = 0, sy = 0; const px = [];
+      while (st.length && n < 4 * p.d * p.d + 50) {
+        const q = st.pop(), x = q % ws, y = (q / ws) | 0; n++; sx += x; sy += y; px.push(q);
+        for (const qq of [q - 1, q + 1, q - ws, q + ws]) {
+          if (qq < 0 || qq >= ws * ws || seen[qq]) continue;
+          if ((qq === q - 1 && x === 0) || (qq === q + 1 && x === ws - 1)) continue;
+          if (dif[qq] >= th) { seen[qq] = 1; st.push(qq); }
+        }
+      }
+      if (n < 6) continue;
+      const mx = sx / n, my = sy / n; let sxx = 0, syy = 0, sxy = 0;
+      for (const q of px) { const dx = q % ws - mx, dy = ((q / ws) | 0) - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+      sxx /= n; syy /= n; sxy /= n;
+      const dm = kurzAchse(sxx, syy, sxy);
+      if (dm > 0.5 * p.d && dm < 2 * p.d + 4) p.d = dm;
     }
   }
   const track = bestT ? bestT.tr.map(p => ({ f: p.f, x: p.x, y: p.y, d: p.d })) : [];
@@ -644,8 +713,13 @@ function lm(res, x0, lo, hi) {
   return { x, c, r };
 }
 
-function anpassen(track, treff, fps, f, cx, cy, al, B, vFest) {
-  const t = track.map(p => (p.f - treff + 0.5) / fps);
+function anpassen(track, treff, fps, f, cx, cy, al, B, vFest, ohneVersatz) {
+  // Ohne Radar ist der Treffmoment oft 1-2 Bilder zu frueh erkannt. Der Zeitversatz (in Bildern) wird als
+  // letzter Parameter mitgeschaetzt und schwach an 0 gebunden; er wirkt auf die Zeiten selbst, also auch
+  // bei echten Zeitstempeln (p.t). Mit Radar steckt der Versatz schon in p[2].
+  const mitDt = vFest == null && !ohneVersatz;
+  const t0 = track.map(p => p.t != null ? p.t : (p.f - treff + 0.5) / fps);
+  let t = t0;
   const obs = track.map(p => [p.x, p.y]);
   // Ballgroesse als zusaetzliche Messung der Entfernung: d = f * 42,67 mm / Tiefe.
   // Kleine Baelle sind ungenau und zaehlen weniger, unter 6 px gar nicht.
@@ -658,8 +732,14 @@ function anpassen(track, treff, fps, f, cx, cy, al, B, vFest) {
   const sizeScale = pr => { let a = 0, b = 0;
     pr.forEach((q, k) => { if (!sw[k]) return; const dp = f * BALL_D / q[2]; a += sw[k] * sw[k] * track[k].d * dp; b += sw[k] * sw[k] * dp * dp; });
     return b ? Math.min(1.5, Math.max(0.7, a / b)) : 1; };
-  const res = p => { const pr = projiziere(bahn(p, t, B, vFest), f, cx, cy, al), o = [], sc = sizeScale(pr);
+  // Bindung des Zeitversatzes: waechst mit der Spurlaenge, damit lange Spuren sie nicht ueberstimmen
+  const wDt = 1.2 * Math.sqrt(Math.max(1, track.length / 25));
+  const res = x => {
+    let p = x, tt = t0, dt = 0;
+    if (mitDt) { dt = x[x.length - 1]; p = x.slice(0, -1); tt = t0.map(v => v - dt / fps); }
+    const pr = projiziere(bahn(p, tt, B, vFest), f, cx, cy, al), o = [], sc = sizeScale(pr);
     pr.forEach((q, k) => { o.push(q[0] - obs[k][0], q[1] - obs[k][1]); if (sw[k]) o.push(sw[k] * (sc * f * BALL_D / q[2] - track[k].d)); });
+    if (mitDt) o.push(wDt * dt);
     return o; };
   const rad = Math.PI / 180;
   let lo, hi, x0;
@@ -669,12 +749,31 @@ function anpassen(track, treff, fps, f, cx, cy, al, B, vFest) {
   if (track.length >= 12) { lo.push(-40); hi.push(40); x0.push(0); }
   // Lange Spur (> 0,15 s): auch den Auftrieb durch Backspin schaetzen
   if (track.length >= 12 && (t[t.length - 1] - t[0]) > 0.15) { lo.push(-5); hi.push(30); x0.push(3); }
+  if (mitDt) { lo.push(-2); hi.push(3); x0.push(0); }
   let best = null;
   for (const th0 of [5, 15, 30]) { x0[0] = th0 * rad; const r = lm(res, x0.slice(), lo, hi); if (!best || r.c < best.c) best = r; }
-  const pr = projiziere(bahn(best.x, t, B, vFest), f, cx, cy, al), gsc = sizeScale(pr);
+  // Rueckgabe wie bisher: p ohne den Zeitversatz, t bereits verschoben -> bahn(p, t) passt fuer alle Aufrufer
+  let dtFrames = 0, pBest = best.x;
+  if (mitDt) { dtFrames = best.x[best.x.length - 1]; pBest = best.x.slice(0, -1); t = t0.map(v => v - dtFrames / fps); }
+  const pr = projiziere(bahn(pBest, t, B, vFest), f, cx, cy, al), gsc = sizeScale(pr);
   let sp = 0, ss = 0, ns = 0;
   pr.forEach((q, k) => { sp += (q[0] - obs[k][0]) ** 2 + (q[1] - obs[k][1]) ** 2; if (sw[k]) { ss += (gsc * f * BALL_D / q[2] - track[k].d) ** 2; ns++; } });
-  return { p: best.x, rms: Math.sqrt(sp / (2 * pr.length)), rmsD: ns ? Math.sqrt(ss / ns) : 0, t, gsc };
+  return { p: pBest, rms: Math.sqrt(sp / (2 * pr.length)), rmsD: ns ? Math.sqrt(ss / ns) : 0, t, gsc, cost: best.c, dtFrames };
+}
+
+// Plausibilitaet der Zeitbasis aus dem Bild: Wie schnell entfernt sich der Ball laut Groessenabnahme?
+// Tiefe = f * 42,67 mm / Durchmesser; Steigung ueber die Zeit (Median aller Punktpaare, robust).
+// In echter Zeitlupe (240 B/s) sind das hoechstens ca. 0,35 m pro Bild, in Echtzeit (30 B/s) ab ca. 0,7 m.
+function tiefeTempo(track, t, f, d0, fps) {
+  const P = [{ t: 0, z: f * BALL_D / d0 }];
+  track.forEach((p, k) => { if (p.d >= 6 && t[k] > 0 && P.length < 13) P.push({ t: t[k], z: f * BALL_D / p.d }); });
+  if (P.length < 2) return null;
+  const sl = [];
+  for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) if (P[j].t - P[i].t > 0.4 / fps) sl.push((P[j].z - P[i].z) / (P[j].t - P[i].t));
+  if (!sl.length) return null;
+  sl.sort((u, v) => u - v);
+  const v = sl[sl.length >> 1];
+  return { v, proBild: v / fps, n: P.length - 1 };
 }
 // ===== CORE END =====
 
@@ -699,15 +798,35 @@ function status(msg, err) { const s = $('status'); s.textContent = msg; s.classL
 function progress(p) { const b = $('bar'); if (p == null) { b.style.display = 'none'; return; } b.style.display = 'block'; $('barfill').style.width = Math.round(p * 100) + '%'; }
 
 let seekTimeouts = 0;
+// Echte Zeitstempel der angezeigten Bilder (falls der Browser sie liefert): erkennt doppelte und uebersprungene Bilder
+let rvfcOK = true, rvfcFehl = 0, lastMT = null;
+const frameMT = new Map();
 function seekFrame(n) {
   const F = num('fpsDatei') || 30;
   const t = Math.min(Math.max(0, video.duration - 0.0005), (n + 0.5) / F);
   return new Promise(res => {
-    let done = false;
-    const fin = to => { if (done) return; done = true; if (to === true) seekTimeouts++; video.removeEventListener('seeked', fin); res(); };
-    video.addEventListener('seeked', fin);
-    setTimeout(() => fin(true), 4000);
-    if (Math.abs(video.currentTime - t) < 1e-6) fin(); else video.currentTime = t;
+    const useR = rvfcOK && !!video.requestVideoFrameCallback;
+    let done = false, seeked = false, mt = null, warte = null;
+    // gleich: kein neues Bild erschienen -> es ist dasselbe Bild wie beim letzten Sprung (doppeltes Bild)
+    const ende = (art) => {
+      if (done) return; done = true;
+      clearTimeout(warte); clearTimeout(notaus); video.removeEventListener('seeked', onSeeked);
+      if (art === 'timeout') seekTimeouts++;
+      else if (useR) {
+        if (mt != null) { rvfcFehl = 0; lastMT = mt; frameMT.set(n, mt); }
+        else if (art === 'gleich') { if (lastMT != null) frameMT.set(n, lastMT); }
+        else if (++rvfcFehl >= 3) rvfcOK = false;          // Browser liefert offenbar keine Zeitstempel
+        else if (lastMT != null) frameMT.set(n, lastMT);
+      }
+      res();
+    };
+    const onSeeked = () => { seeked = true; if (!useR || mt != null) ende(); else warte = setTimeout(() => ende(), 60); };
+    const notaus = setTimeout(() => ende('timeout'), 4000);
+    if (Math.abs(video.currentTime - t) < 1e-6) { ende('gleich'); return; }
+    // Callback vor dem Sprung anmelden, sonst kann das neue Bild schon gezeigt sein, bevor wir zuhoeren
+    if (useR) video.requestVideoFrameCallback((now, md) => { if (done) return; mt = md.mediaTime; if (seeked) ende(); });
+    video.addEventListener('seeked', onSeeked);
+    video.currentTime = t;
   });
 }
 
@@ -735,6 +854,18 @@ function drawView() {
     vctx.beginPath();
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { vctx.moveTo(ball.x + dx * g1, ball.y + dy * g1); vctx.lineTo(ball.x + dx * g2, ball.y + dy * g2); }
     vctx.stroke();
+  }
+  if (ball && typeof zieht !== 'undefined' && zieht) {
+    // Lupe oben links: 3-fach vergroessert um die Markierung
+    const D = Math.round(W * 0.4), src = Math.max(ball.d * 3, W / 7), m = Math.round(W * 0.03);
+    vctx.save();
+    vctx.fillStyle = '#000'; vctx.fillRect(m - 3, m - 3, D + 6, D + 6);
+    vctx.drawImage(video, ball.x - src / 2, ball.y - src / 2, src, src, m, m, D, D);
+    const k = D / src, c = m + D / 2;
+    vctx.strokeStyle = '#3E7BF0'; vctx.lineWidth = Math.max(2, W / 300);
+    vctx.beginPath(); vctx.arc(c, c, ball.d / 2 * k, 0, Math.PI * 2); vctx.stroke();
+    vctx.beginPath(); vctx.moveTo(c - D * 0.12, c); vctx.lineTo(c + D * 0.12, c); vctx.moveTo(c, c - D * 0.12); vctx.lineTo(c, c + D * 0.12); vctx.stroke();
+    vctx.restore();
   }
   $('flabel').textContent = `Bild ${cur} von ${nFrames - 1}`;
 }
@@ -769,6 +900,7 @@ $('file').addEventListener('change', async e => {
   // Auswahl erst beim naechsten Antippen leeren (siehe click-Handler); sofortiges Leeren kann unter iOS die Datei ungueltig machen
   if (!f) return;
   if (busy) { status('Bitte warten, bis die Auswertung fertig ist.', true); return; }
+  frameMT.clear(); rvfcOK = true; rvfcFehl = 0; lastMT = null;
   status('Video wird geladen …'); ball = null; mode = 'start'; lastTreff = null; $('result').hidden = true; updateBallInfo();
   if (video.src) URL.revokeObjectURL(video.src);
   video.src = URL.createObjectURL(f);
@@ -809,21 +941,24 @@ async function autoBall() {
       n = Math.max(0, Math.min(nFrames - 1, n));
       if (cache.has(n)) return cache.get(n);
       await seekFrame(n); work.width = w; work.height = h; wctx.drawImage(video, 0, 0, W, H, 0, 0, w, h);
-      const d = wctx.getImageData(0, 0, w, h).data, g = new Float32Array(w * h);
-      for (let i = 0, j = 0; i < w * h; i++, j += 4) g[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
-      cache.set(n, g); return g;
+      const d = wctx.getImageData(0, 0, w, h).data, g = new Uint8ClampedArray(w * h), cc = new Uint8ClampedArray(w * h);
+      for (let i = 0, j = 0; i < w * h; i++, j += 4) { g[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2]; cc[i] = 128 + 0.5 * (d[j] - d[j + 2]); }
+      const fo = { g, c: cc }; cache.set(n, fo); return fo;
     };
     const R = Math.max(6, Math.round(w / 14));
     const blobs = (n, g0) => {
       if (blobCache.has(n)) return blobCache.get(n);
-      const I = new Float64Array((w + 1) * (h + 1));
-      for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += g0[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + row; } }
+      const integ = a => { const I = new Float64Array((w + 1) * (h + 1));
+        for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += a[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + row; } } return I; };
+      const IG = integ(g0.g), IC = integ(g0.c);
       const m = new Uint8Array(w * h);
       // der ruhende Ball liegt immer in der unteren Bildhaelfte
       for (let y = zone ? 0 : Math.round(h * 0.5); y < h; y++) for (let x = 0; x < w; x++) {
         const xa = Math.max(0, x - R), xb = Math.min(w, x + R + 1), ya = Math.max(0, y - R), yb = Math.min(h, y + R + 1);
-        const sum = I[yb * (w + 1) + xb] - I[ya * (w + 1) + xb] - I[yb * (w + 1) + xa] + I[ya * (w + 1) + xa];
-        if (g0[y * w + x] - sum / ((xb - xa) * (yb - ya)) > 18) m[y * w + x] = 1;
+        const ar = (xb - xa) * (yb - ya), box = I => (I[yb * (w + 1) + xb] - I[ya * (w + 1) + xb] - I[yb * (w + 1) + xa] + I[ya * (w + 1) + xa]) / ar;
+        // Ball hebt sich ab: heller, dunkler oder andersfarbig als seine Umgebung
+        const kg = Math.abs(g0.g[y * w + x] - box(IG)), kc = Math.abs(g0.c[y * w + x] - box(IC));
+        if (Math.max(kg, 1.5 * kc) > 18) m[y * w + x] = 1;
       }
       const out = [];
       for (const c of components(m, w, h, 4, 4000)) {
@@ -834,11 +969,11 @@ async function autoBall() {
       }
       blobCache.set(n, out); return out;
     };
-    const mean = (ga, gb, pix) => { let su = 0; for (const q of pix) su += Math.abs(ga[q] - gb[q]); return su / pix.length; };
+    const mean = (ga, gb, pix) => { let su = 0; for (const q of pix) su += Math.max(Math.abs(ga.g[q] - gb.g[q]), Math.abs(ga.c[q] - gb.c[q])); return su / pix.length; };
     const boxMot = (ga, gb, cx, cy, hr) => {
       let su = 0, n = 0;
       for (let y = Math.max(0, Math.round(cy - hr)); y < Math.min(h, Math.round(cy + hr)); y++)
-        for (let x = Math.max(0, Math.round(cx - hr)); x < Math.min(w, Math.round(cx + hr)); x++) { su += Math.abs(ga[y * w + x] - gb[y * w + x]); n++; }
+        for (let x = Math.max(0, Math.round(cx - hr)); x < Math.min(w, Math.round(cx + hr)); x++) { su += Math.abs(ga.g[y * w + x] - gb.g[y * w + x]); n++; }
       return n ? su / n : 0;
     };
     const step = Math.max(2, Math.round((num('fpsReal') || 240) / 30)); // bei 240 B/s: 8 Bilder = 1/30 s
@@ -846,9 +981,10 @@ async function autoBall() {
     const t0 = Date.now(), to0 = seekTimeouts;
     let best = null; const alle = [];
     for (let k = step; k + 3 * step < nFrames; k += step) {
+      for (const key of cache.keys()) if (key < k - step) { cache.delete(key); blobCache.delete(key); }   // Speicher frei halten
       const gp = await grabSmall(k - step), g0 = await grabSmall(k), g1 = await grabSmall(k + step), g3 = await grabSmall(k + 3 * step);
       z.bilder++;
-      { let su = 0; for (let i = 0; i < g0.length; i += 7) su += Math.abs(g1[i] - g0[i]); z.bew = Math.max(z.bew, su / (g0.length / 7)); }
+      { let su = 0; for (let i = 0; i < g0.g.length; i += 7) su += Math.abs(g1.g[i] - g0.g[i]); z.bew = Math.max(z.bew, su / (g0.g.length / 7)); }
       if (z.bilder % 10 === 0) status(`Suche den Ball … ${Math.round(100 * k / nFrames)} %`);
       for (const c of blobs(k, g0)) {
         z.flecken++;
@@ -856,7 +992,7 @@ async function autoBall() {
         const gone1 = mean(g1, g0, c.pix), gone3 = mean(g3, g0, c.pix);
         if (gone1 < 25 || gone3 < 25) { z.nichtWeg++; continue; }                     // muss weg sein und weg bleiben
         z.kandidaten++;
-        const hell = c.pix.reduce((p, q) => p + g0[q], 0) / c.pix.length;
+        const hell = 255; // Helligkeit zaehlt nicht mehr: der Ball darf auch dunkler oder nur andersfarbig sein
         const mot = boxMot(g1, g0, c.x, c.y, 3 * c.r + 4);                             // Schlaeger und Haende rund um den Ball
         const mx_ = ((c.x / sc) - W / 2) / (0.35 * W), mitte = Math.exp(-(mx_ * mx_));
         const gr = Math.min(1, c.dFull / 22);
@@ -898,39 +1034,66 @@ async function autoBall() {
 }
 let autoInfo = '', autoCands = [];
 
-// Ball um den Tipp-Punkt herum genau bestimmen
+// Ball um den Tipp-Punkt herum genau bestimmen – ueber Farbe statt Helligkeit:
+// ein Pixel gehoert zum Ball, wenn seine Farbe naeher an der Ballfarbe liegt als an der Umgebung.
+// Der Durchmesser kommt aus der breitesten Zeile (unempfindlich gegen Schatten unten und den Tee).
 function refineBall(tx, ty) {
   const win = Math.round(Math.max(60, Math.max(W, H) * 0.06));
   const sx = Math.max(0, Math.min(W - win, Math.round(tx - win / 2))), sy = Math.max(0, Math.min(H - win, Math.round(ty - win / 2)));
   work.width = win; work.height = win;
   wctx.drawImage(video, sx, sy, win, win, 0, 0, win, win);
-  const d = wctx.getImageData(0, 0, win, win).data, n = win * win, g = new Float32Array(n);
-  for (let i = 0, j = 0; i < n; i++, j += 4) g[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+  const d = wctx.getImageData(0, 0, win, win).data, n = win * win;
+  const med = a => { a.sort((u, v) => u - v); return a[a.length >> 1]; };
+  // Umgebungsfarbe: Median am Fensterrand
+  const br = [], bg_ = [], bb = [], rand = Math.max(3, Math.round(win * 0.12));
+  for (let y = 0; y < win; y++) for (let x = 0; x < win; x++) {
+    if (x >= rand && x < win - rand && y >= rand && y < win - rand) continue;
+    const j = (y * win + x) * 4; br.push(d[j]); bg_.push(d[j + 1]); bb.push(d[j + 2]);
+  }
+  const bgc = [med(br), med(bg_), med(bb)];
+  const dist = (j, c) => Math.hypot(d[j] - c[0], d[j + 1] - c[1], d[j + 2] - c[2]);
+  // Startpunkt: Pixel nahe am Tipp, das sich am staerksten von der Umgebung abhebt
   const lx = tx - sx, ly = ty - sy, R = win / 4;
   let bi = -1, bv = -1;
-  for (let y = 0; y < win; y++) for (let x = 0; x < win; x++) if (Math.hypot(x - lx, y - ly) <= R && g[y * win + x] > bv) { bv = g[y * win + x]; bi = y * win + x; }
-  const sorted = Array.from(g).sort((a, b) => a - b), med = sorted[n >> 1];
-  const th = med + 0.3 * (bv - med);
+  for (let y = 0; y < win; y++) for (let x = 0; x < win; x++) {
+    if (Math.hypot(x - lx, y - ly) > R) continue;
+    const v = dist((y * win + x) * 4, bgc); if (v > bv) { bv = v; bi = y * win + x; }
+  }
+  if (bi < 0 || bv < 25) return { x: tx, y: ty, d: Math.max(10, W / 50), unsure: true };
+  // Ballfarbe: Mittel um den Startpunkt
+  const bc = [0, 0, 0]; let nb = 0;
+  for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) {
+    const xx = bi % win + x, yy = ((bi / win) | 0) + y; if (xx < 0 || yy < 0 || xx >= win || yy >= win) continue;
+    const j = (yy * win + xx) * 4; bc[0] += d[j]; bc[1] += d[j + 1]; bc[2] += d[j + 2]; nb++;
+  }
+  for (let q = 0; q < 3; q++) bc[q] /= nb;
   const seen = new Uint8Array(n), st = [bi]; seen[bi] = 1;
-  let a = 0, sxs = 0, sys = 0, mnx = win, mxx = 0, mny = win, mxy = 0;
+  const zeileMin = new Int32Array(win).fill(win), zeileMax = new Int32Array(win).fill(-1);
+  let a = 0, sxs = 0, sys = 0, mny = win;
   while (st.length) {
     const p = st.pop(), x = p % win, y = (p / win) | 0; a++; sxs += x; sys += y;
-    if (x < mnx) mnx = x; if (x > mxx) mxx = x; if (y < mny) mny = y; if (y > mxy) mxy = y;
+    if (x < zeileMin[y]) zeileMin[y] = x; if (x > zeileMax[y]) zeileMax[y] = x; if (y < mny) mny = y;
     for (const q of [p - 1, p + 1, p - win, p + win]) {
       if (q < 0 || q >= n || seen[q]) continue;
       if ((q === p - 1 && x === 0) || (q === p + 1 && x === win - 1)) continue;
-      if (g[q] >= th) { seen[q] = 1; st.push(q); }
+      const j = q * 4;
+      if (dist(j, bc) < dist(j, bgc)) { seen[q] = 1; st.push(q); }
     }
   }
-  const dd = Math.max(2 * Math.sqrt(a / Math.PI), (mxx - mnx + mxy - mny) / 2 + 1);
-  if (bv - med < 25 || a < 4 || dd > win * 0.7) return { x: tx, y: ty, d: Math.max(10, W / 50), unsure: true };
-  return { x: sx + sxs / a, y: sy + sys / a, d: dd, unsure: false };
+  let breit = 0, breitY = 0;
+  for (let y = 0; y < win; y++) if (zeileMax[y] >= 0 && zeileMax[y] - zeileMin[y] + 1 > breit) { breit = zeileMax[y] - zeileMin[y] + 1; breitY = y; }
+  const dd = Math.max(breit, 2 * Math.sqrt(a / Math.PI));
+  if (a < 4 || dd > win * 0.8) return { x: tx, y: ty, d: Math.max(10, W / 50), unsure: true };
+  // Mitte: waagerecht aus der breitesten Zeile, senkrecht von der Oberkante aus (unten stoeren Schatten und Tee)
+  const cxB = (zeileMin[breitY] + zeileMax[breitY]) / 2, cyB = Math.min(sys / a + dd * 0.15, mny + dd / 2);
+  return { x: sx + cxB, y: sy + cyB, d: dd, unsure: false };
 }
 
-view.addEventListener('click', e => {
-  if (!W || busy) return;
+function tapAt(clientX, clientY) {
+  if (!W) return;
+  if (busy) { status('Bitte kurz warten – die App rechnet noch. Danach kannst du den Ball antippen.', true); return; }
   const r = view.getBoundingClientRect();
-  const tx = (e.clientX - r.left) / r.width * W, ty = (e.clientY - r.top) / r.height * H;
+  const tx = (clientX - r.left) / r.width * W, ty = (clientY - r.top) / r.height * H;
   if (mode === 'zone') {
     mode = 'start';
     zone = { x: tx / W, y: ty / H };
@@ -955,7 +1118,59 @@ view.addEventListener('click', e => {
   ball = { x: b.x, y: b.y, d: b.d, frame: cur };
   drawView(); updateBallInfo();
   status(b.unsure ? 'Ball nicht eindeutig erkannt. Genauer tippen oder Kreis mit − / + anpassen.' : 'Ball markiert. Passt der Kreis, auf „Ball verfolgen“ tippen.', b.unsure);
-});
+}
+view.addEventListener('click', e => { if (klickSperre) { klickSperre = false; return; } tapAt(e.clientX, e.clientY); });
+
+// Markierung mit dem Finger verschieben: relativ und mit halber Geschwindigkeit, damit der Finger den Ball
+// nicht verdeckt und man fein justieren kann. Beim Ziehen zeigt eine Lupe die Stelle vergroessert.
+let zieht = null, gezogen = false, klickSperre = false;
+function ziehStart(cx, cy) {
+  if (!ball || busy || !W || mode !== 'start') return false;
+  const r = view.getBoundingClientRect(), s = W / r.width;
+  const x = (cx - r.left) * s, y = (cy - r.top) * s;
+  // Ziehen nur, wenn der Finger direkt auf dem Kreuz aufsetzt; Tippen daneben setzt den Ball neu
+  if (Math.hypot(x - ball.x, y - ball.y) > Math.max(ball.d * 0.6 + 8 * s, 30 * s)) return false;
+  zieht = { sx: cx, sy: cy, bx: ball.x, by: ball.y, s }; gezogen = false; return true;
+}
+function ziehen(cx, cy) {
+  if (!zieht) return;
+  if (!gezogen && Math.hypot(cx - zieht.sx, cy - zieht.sy) < 10) return;   // kleines Zittern beim Tippen ist kein Ziehen
+  gezogen = true;
+  ball.x = Math.max(0, Math.min(W, zieht.bx + (cx - zieht.sx) * zieht.s * 0.5));
+  ball.y = Math.max(0, Math.min(H, zieht.by + (cy - zieht.sy) * zieht.s * 0.5));
+  drawView();
+}
+function ziehEnde(tippen) {
+  if (!zieht) return;
+  const z = zieht; zieht = null;
+  if (gezogen) {
+    ball.frame = cur; ball.auto = false; autoCands = []; updateBallInfo();
+    status('Markierung verschoben. „Ball verfolgen“ startet die Auswertung mit dieser Position.');
+    klickSperre = true; setTimeout(() => { klickSperre = false; }, 400);
+  } else if (tippen) tapAt(z.sx, z.sy);
+  drawView();
+}
+// Touch komplett selbst auswerten (unabhaengig davon, ob iOS danach noch einen Klick schickt)
+let tipp = null;
+view.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1) { tipp = null; return; }
+  const t = e.touches[0]; tipp = { x: t.clientX, y: t.clientY };
+  if (ziehStart(t.clientX, t.clientY)) e.preventDefault();
+}, { passive: false });
+view.addEventListener('touchmove', e => {
+  const t = e.touches[0];
+  if (zieht) { e.preventDefault(); ziehen(t.clientX, t.clientY); return; }
+  if (tipp && Math.hypot(t.clientX - tipp.x, t.clientY - tipp.y) > 10) tipp = null;   // Seite wird gescrollt
+}, { passive: false });
+view.addEventListener('touchend', e => {
+  if (zieht) { e.preventDefault(); ziehEnde(true); tipp = null; return; }
+  if (tipp) { e.preventDefault(); const t = tipp; tipp = null; tapAt(t.x, t.y); }
+}, { passive: false });
+view.addEventListener('touchcancel', () => { tipp = null; if (zieht) ziehEnde(false); });
+view.addEventListener('mousedown', e => { if (ziehStart(e.clientX, e.clientY)) e.preventDefault(); });
+window.addEventListener('mousemove', e => { if (zieht) ziehen(e.clientX, e.clientY); });
+window.addEventListener('mouseup', () => { if (zieht) ziehEnde(false); });
+
 $('dminus').addEventListener('click', () => { if (ball) { ball.d = Math.max(3, ball.d * 0.9); drawView(); updateBallInfo(); } });
 $('dplus').addEventListener('click', () => { if (ball) { ball.d *= 1.1; drawView(); updateBallInfo(); } });
 $('zoneset').addEventListener('click', () => {
@@ -1017,7 +1232,7 @@ async function runAnalysis(seed) {
       await seekFrame(n);
       wctx.drawImage(video, x0, y0, crop.cw, crop.ch, 0, 0, crop.cw, crop.ch);
       const img = wctx.getImageData(0, 0, crop.cw, crop.ch);
-      return { img, g: blurGray(img.data, crop.cw, crop.ch) };
+      return { img, g: blurGray(img.data, crop.cw, crop.ch), h: blurChroma(img.data, crop.cw, crop.ch) };
     };
     const roiC = document.createElement('canvas'), roiX = roiC.getContext('2d', { willReadFrequently: true });
     const grabRoi = async (n, rx, ry, rw) => {
@@ -1032,8 +1247,11 @@ async function runAnalysis(seed) {
     // ohne Abstand ergibt sich der Abstand aus der Ballgroesse
     const cx = W / 2, cy = H / 2;
     let f, abstand, fQuelle, abQuelle;
-    if (abIn > 0) { abstand = abIn; f = d0 * Math.hypot(abstand, hoehe) / BALL_D; fQuelle = 'am Ball kalibriert'; abQuelle = 'gemessen'; }
-    else { f = Math.max(W, H) / 2 / Math.tan(hfov * Math.PI / 360); const Z = f * BALL_D / d0; abstand = Math.sqrt(Math.max(0.01, Z * Z - hoehe * hoehe)); fQuelle = `aus Bildwinkel ${de(hfov, 0)}°`; abQuelle = 'aus Ballgröße'; }
+    // Die Ballgroesse im Bild haengt von der Tiefe laengs der Kameraachse ab (d = f*D/Z), nicht von der Entfernung.
+    // Liegt der Ball abseits der Bildmitte (Abstand rPix), ist die Tiefe um cos(Winkel) kleiner als die Entfernung.
+    const rPix = Math.hypot(cx0 - cx, cy0 - cy);
+    if (abIn > 0) { abstand = abIn; const q = d0 * Math.hypot(abstand, hoehe) / BALL_D; f = Math.sqrt(Math.max(q * q - rPix * rPix, 0.25 * q * q)); fQuelle = 'am Ball kalibriert'; abQuelle = 'gemessen'; }
+    else { f = Math.max(W, H) / 2 / Math.tan(hfov * Math.PI / 360); const Zc = f * BALL_D / d0, rho = Zc * Math.hypot(f, rPix) / f; abstand = Math.sqrt(Math.max(0.01, rho * rho - hoehe * hoehe)); fQuelle = `aus Bildwinkel ${de(hfov, 0)}°`; abQuelle = 'aus Ballgröße'; }
     const hfovEff = 2 * Math.atan(Math.max(W, H) / 2 / f) * 180 / Math.PI;
     const { al, B } = kameraLage([cx0, cy0], f, cx, cy, abstand, hoehe);
     const vF = speed > 0 ? speed / 3.6 : null;
@@ -1042,15 +1260,15 @@ async function runAnalysis(seed) {
       await seekFrame(n);
       roiC.width = rw; roiC.height = rw;
       roiX.drawImage(video, rx, ry, rw, rw, 0, 0, rw, rw);
-      const d = roiX.getImageData(0, 0, rw, rw).data, r = new Float32Array(rw * rw);
-      for (let i = 0, j = 0; i < rw * rw; i++, j += 4) r[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+      const d = roiX.getImageData(0, 0, rw, rw).data, r = { l: new Float32Array(rw * rw), c: new Float32Array(rw * rw) };
+      for (let i = 0, j = 0; i < rw * rw; i++, j += 4) { r.l[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2]; r.c[i] = 128 + 0.5 * (d[j] - d[j + 2]); }
       return r;
     };
     // Vorhersage aus der physikalischen Bahn: wo muss der Ball in Bild n sein?
     const makePredictor = (trk, tf) => {
       if (trk.length < 10) return null;
       try {
-        const ft = anpassen(trk, tf, fpsReal, f, cx, cy, al, B, vF);
+        const ft = anpassen(trk, tf, fpsReal, f, cx, cy, al, B, vF, true);
         if (!(ft.rms < 3)) return null;
         return n => { const q = projiziere(bahn(ft.p, [(n - tf + 0.5) / fpsReal], B, vF), f, cx, cy, al)[0]; return q[2] > 0.3 ? [q[0], q[1]] : null; };
       } catch (e) { return null; }
@@ -1088,8 +1306,18 @@ async function runAnalysis(seed) {
   if (out.error) { status('Die Auswertung ist abgebrochen. Video neu laden und noch einmal versuchen.', true); return; }
   if (out.track.length < 4) { status(`Ball nur in ${out.track.length} Bildern gefunden – zu wenig. Bewegungsschwelle senken (z. B. 12) oder Startbild prüfen.`, true); return; }
 
+  // Zeitbasis aus den echten Bildzeitstempeln (falls vorhanden): doppelte Bilder raus, Zeiten exakt
+  let zeitEcht = false, doppelt = 0;
+  { const mtT = frameMT.get(out.treff);
+    if (mtT != null && out.track.every(p => frameMT.has(p.f))) {
+      const kfak = (num('fpsDatei') || 30) / fpsReal, ded = []; let lastMt = -Infinity;
+      for (const p of out.track) { const mt = frameMT.get(p.f); if (mt <= lastMt + 1e-6) { doppelt++; continue; } lastMt = mt; ded.push({ ...p, t: (mt - mtT) * kfak + 0.5 / fpsReal }); }
+      // Fallen sehr viele Punkte weg, stimmen eher die Zeitstempel nicht als das Video
+      if (ded.length >= 4 && doppelt <= 0.25 * out.track.length) { out.track = ded; zeitEcht = true; } else doppelt = 0;
+    } }
   const fit = anpassen(out.track, out.treff, fpsReal, f, cx, cy, al, B, vF);
   const rueck = rueckOf(out, cx0, cy0);
+  const tt = tiefeTempo(out.track, fit.t, f, d0, fpsReal);
   const th = fit.p[0] * 180 / Math.PI, ph = fit.p[1] * 180 / Math.PI;
   $('rDir').textContent = de(Math.abs(ph)) + '°';
   $('rDirSub').textContent = Math.abs(ph) < 0.05 ? 'gerade' : (ph > 0 ? 'rechts' : 'links');
@@ -1124,7 +1352,8 @@ async function runAnalysis(seed) {
     `Kurve (Seitenbeschleunigung): ${fit.p.length > 3 ? de(fit.p[3]) + ' m/s² ' + (fit.p[3] > 0 ? 'nach rechts' : 'nach links') : 'nicht geschaetzt (zu wenige Punkte)'}`,
     `Auftrieb (Backspin): ${aV != null ? de(aV) + ' m/s² nach oben' : 'nicht geschaetzt (Spur zu kurz), Standardwert'}`,
     `Flug-Schaetzung: Carry ${de(fl.carry, 0)} m, seitlich ${de(Math.abs(fl.side), 1)} m ${fl.side > 0 ? 'rechts' : 'links'}, Scheitel ${de(fl.apex, 1)} m`,
-    `Restfehler: ${de(fit.rms)} px (Position), ${de(fit.rmsD)} px (Ballgroesse), Groessenfaktor ${de(fit.gsc, 2)}`,
+    `Restfehler: ${de(fit.rms)} px (Position), ${de(fit.rmsD)} px (Ballgroesse), Groessenfaktor ${de(fit.gsc, 2)}, Zeitversatz ${de(fit.dtFrames || 0, 1)} Bilder, Zeitstempel ${zeitEcht ? 'echt' : 'berechnet'}${doppelt ? `, ${doppelt} doppelte Bilder entfernt` : ''}`,
+    `Zeitbasis-Pruefung: ${tt ? `Ball entfernt sich laut Groessenabnahme um ${de(tt.proBild, 2)} m pro Bild (${de(tt.v * 3.6, 0)} km/h bei ${de(fpsReal, 0)} B/s; Zeitlupe bis ca. 0,35, Echtzeit ab ca. 0,7)` : 'nicht moeglich (Ball zu klein)'}`,
     `Spur zurueckverlaengert zum Treffmoment: ${Math.round(rueck)} px neben dem markierten Ball (${de(rueck / d0, 1)} Balldurchmesser)`,
     'Punkte (Bild, ms, x, y, Durchmesser px):',
     ...out.track.map((p, k) => `  ${p.f}, ${(fit.t[k] * 1000).toFixed(1)}, ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.d.toFixed(1)}`)
@@ -1133,9 +1362,14 @@ async function runAnalysis(seed) {
   $('details').textContent = lastText;
   $('result').hidden = false;
   const neig = al * 180 / Math.PI;
-  if (rueck > 2 * d0) status(`Achtung: Die Spur führt nicht zum markierten Ball zurück (${de(rueck / d0, 1)} Balldurchmesser daneben). Entweder ist ein anderer Ball markiert oder die Spur folgt etwas anderem. Werte nicht verwenden.`, true);
+  const vFit = (vF || fit.p[2]) * 3.6;
+  const fDat = num('fpsDatei') || 30;
+  if (tt && tt.proBild > 0.5) status(`Achtung: Die Zeitbasis passt nicht. Der Ball entfernt sich um ${de(tt.proBild, 1)} m pro Bild – bei ${de(fpsReal, 0)} B/s wären das ${de(tt.v * 3.6, 0)} km/h, bei ${de(fDat, 0)} B/s ${de(tt.v * 3.6 * fDat / fpsReal, 0)} km/h. Der Treffer liegt sehr wahrscheinlich nicht im verlangsamten Teil der Zeitlupe. In der Fotos-App unter „Bearbeiten“ den Zeitlupenbereich über das ganze Video ziehen und neu laden. Werte nicht verwenden.`, true);
+  else if (!vF && (vFit > 320 || vFit < 40)) status(`Achtung: Die Ballspeed (${de(vFit, 0)} km/h) ist unrealistisch. Meist liegt der Treffer nicht im verlangsamten Teil der Zeitlupe (in der Fotos-App den Zeitlupenbereich über das ganze Video ziehen) oder die Bildrate stimmt nicht. Werte nicht verwenden.`, true);
+  else if (rueck > 2 * d0) status(`Achtung: Die Spur führt nicht zum markierten Ball zurück (${de(rueck / d0, 1)} Balldurchmesser daneben). Entweder ist ein anderer Ball markiert oder die Spur folgt etwas anderem. Werte nicht verwenden.`, true);
   else if (abIn > 0 && (hfovEff < 45 || hfovEff > 90)) status(`Achtung: Aus Abstand und Ballgröße ergibt sich ein Bildwinkel von ${de(hfovEff, 0)}° – unwahrscheinlich. Abstand nachmessen oder prüfen, ob der blaue Kreis genau um den Ball liegt.`, true);
   else if (neig < -50 || neig > 30) status(`Achtung: Kamera-Neigung ${de(neig)}° ist unwahrscheinlich. Höhe (Linse über Ballmitte, z. B. 0,2) und Abstand prüfen.`, true);
+  else if (fit.gsc <= 0.71 || fit.gsc >= 1.49) status(`Achtung: Der Größenfaktor (${de(fit.gsc, 2)}) liegt an der Grenze. Ballgröße und Bahn passen nicht zusammen – Ballmarkierung, Abstand oder Zeitbasis prüfen. Speed und Carry nicht verwenden.`, true);
   else status(`Fertig: ${out.track.length} Ballpositionen, Restfehler ${de(fit.rms)} px.`);
   lastTreff = out.treff;
   $('result').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
@@ -1388,13 +1622,14 @@ async function tracerVideo(g, onProg) {
   };
   const marke = () => { const fs = Math.round(w / 34); o.font = `600 ${fs}px Barlow, system-ui, sans-serif`; o.fillStyle = 'rgba(255,255,255,0.8)';
     o.textBaseline = 'bottom'; o.fillText('Birdino Ballspur', fs * 0.8, h - fs * 0.8); };
-  const tLast = (n1 - out.treff + 0.5) / fpsReal;
+  const dtS = (fit.dtFrames || 0) / fpsReal;
+  const tLast = (n1 - out.treff + 0.5) / fpsReal - dtS;
   for (let i = 0; i < total; i++) {
     if (i < nVid) {
       const n = n0 + i; await seekFrame(n);
       o.drawImage(video, 0, 0, w, h);
       if (i === nVid - 1) po.drawImage(video, 0, 0, w, h);
-      const t = (n - out.treff + 0.5) / fpsReal; if (t > 0) zeichneBahn(t);
+      const t = (n - out.treff + 0.5) / fpsReal - dtS; if (t > 0) zeichneBahn(t);
     } else {
       o.drawImage(plain, 0, 0);
       const k = i - nVid, p = Math.min(1, k / holdN), e = 1 - Math.pow(1 - p, 3);
@@ -1453,6 +1688,8 @@ async function renderShots() {
     t.append(kopf, document.createElement('br'), document.createTextNode(werteText(s.werte)));
     b.append(img, t); b.addEventListener('click', () => openShot(s.id)); box.append(b);
   }
+  $('delVids').disabled = !list.some(x => x.video); $('delAll').disabled = !list.length;
+  try { const e = await navigator.storage.estimate(); $('speicher').textContent = list.length ? `${list.length} Schläge, belegt etwa ${de((e.usage || 0) / 1048576, 0)} MB` : ''; } catch (e) {}
 }
 
 let dlgShot = null;
@@ -1467,6 +1704,7 @@ async function openShot(id) {
   if (di.src) URL.revokeObjectURL(di.src);
   if (s.video) { dv.src = URL.createObjectURL(s.video); dv.hidden = false; } else { dv.removeAttribute('src'); dv.hidden = true; }
   di.src = URL.createObjectURL(s.bild);
+  $('dlgDelVid').hidden = !s.video;
   $('shotDlg').showModal();
   if (s.video) dv.play().catch(() => {});
 }
@@ -1479,6 +1717,21 @@ $('dlgShare').addEventListener('click', () => {
 $('dlgDel').addEventListener('click', async () => {
   if (!dlgShot || !confirm('Diesen Schlag löschen?')) return;
   await DB.del(dlgShot.id); $('dlgVid').pause(); $('shotDlg').close(); renderShots();
+});
+$('dlgDelVid').addEventListener('click', async () => {
+  if (!dlgShot || !dlgShot.video || !confirm('Nur das Video dieses Schlags löschen? Bild und Werte bleiben.')) return;
+  dlgShot.video = null; await DB.put(dlgShot);
+  const dv = $('dlgVid'); dv.pause(); dv.hidden = true; $('dlgDelVid').hidden = true; renderShots();
+});
+$('delVids').addEventListener('click', async () => {
+  if (!confirm('Alle Videos löschen? Bilder und Werte bleiben erhalten.')) return;
+  for (const s of await DB.all()) if (s.video) { s.video = null; await DB.put(s); }
+  renderShots();
+});
+$('delAll').addEventListener('click', async () => {
+  if (!confirm('Wirklich alle gespeicherten Schläge löschen?')) return;
+  for (const s of await DB.all()) await DB.del(s.id);
+  renderShots();
 });
 renderShots();
 
