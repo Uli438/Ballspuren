@@ -990,26 +990,29 @@ async function autoBall() {
       const fo = { g, c: cc }; cache.set(n, fo); return fo;
     };
     const R = Math.max(6, Math.round(w / 14));
+    let kTh = 18;   // Kontrastschwelle des laufenden Durchgangs
     const blobs = (n, g0) => {
       if (blobCache.has(n)) return blobCache.get(n);
       const integ = a => { const I = new Float64Array((w + 1) * (h + 1));
         for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += a[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + row; } } return I; };
       const IG = integ(g0.g), IC = integ(g0.c);
-      const m = new Uint8Array(w * h);
+      const m = new Uint8Array(w * h), kon = new Float32Array(w * h);
       // der ruhende Ball liegt immer in der unteren Bildhaelfte
       for (let y = zone ? 0 : Math.round(h * 0.5); y < h; y++) for (let x = 0; x < w; x++) {
         const xa = Math.max(0, x - R), xb = Math.min(w, x + R + 1), ya = Math.max(0, y - R), yb = Math.min(h, y + R + 1);
         const ar = (xb - xa) * (yb - ya), box = I => (I[yb * (w + 1) + xb] - I[ya * (w + 1) + xb] - I[yb * (w + 1) + xa] + I[ya * (w + 1) + xa]) / ar;
         // Ball hebt sich ab: heller, dunkler oder andersfarbig als seine Umgebung
         const kg = Math.abs(g0.g[y * w + x] - box(IG)), kc = Math.abs(g0.c[y * w + x] - box(IC));
-        if (Math.max(kg, 1.5 * kc) > 18) m[y * w + x] = 1;
+        const kv = Math.max(kg, 1.5 * kc); kon[y * w + x] = kv;
+        if (kv > kTh) m[y * w + x] = 1;
       }
       const out = [];
       for (const c of components(m, w, h, 4, 4000)) {
         const dFull = 2 * c.r / sc; if (dFull < 10 || dFull > 120) continue;
         const rund = c.a / (Math.PI * c.r * c.r + 1e-6); if (rund < 0.45) continue;
         if (zone && Math.hypot(c.x / sc - zone.x * W, c.y / sc - zone.y * H) > zoneR()) continue;
-        out.push({ ...c, dFull, rund });
+        let ks = 0; for (const q of c.pix) ks += kon[q];
+        out.push({ ...c, dFull, rund, kon: ks / c.pix.length });   // eigener Kontrast des Flecks
       }
       blobCache.set(n, out); return out;
     };
@@ -1021,9 +1024,14 @@ async function autoBall() {
       return n ? su / n : 0;
     };
     const step = Math.max(2, Math.round((num('fpsReal') || 240) / 30)); // bei 240 B/s: 8 Bilder = 1/30 s
-    const z = { bilder: 0, flecken: 0, bewegt: 0, nichtWeg: 0, kandidaten: 0, bew: 0 };
+    let z = { bilder: 0, flecken: 0, bewegt: 0, nichtWeg: 0, kandidaten: 0, bew: 0 };
     const t0 = Date.now(), to0 = seekTimeouts;
-    let best = null; const alle = [];
+    let best = null, alle = [];
+    // Zwei Durchgaenge: erst mit der normalen Kontrastschwelle, dann - nur wenn nichts gefunden wurde - empfindlicher
+    // (Ball im Schatten hebt sich oft nur schwach vom Rasen ab).
+    for (kTh of [18, 11]) {
+    cache.clear(); blobCache.clear(); best = null; alle = [];
+    z = { bilder: 0, flecken: 0, bewegt: 0, nichtWeg: 0, kandidaten: 0, bew: 0 };
     for (let k = step; k + 3 * step < nFrames; k += step) {
       for (const key of cache.keys()) if (key < k - step) { cache.delete(key); blobCache.delete(key); }   // Speicher frei halten
       const gp = await grabSmall(k - step), g0 = await grabSmall(k), g1 = await grabSmall(k + step), g3 = await grabSmall(k + 3 * step);
@@ -1032,9 +1040,12 @@ async function autoBall() {
       if (z.bilder % 10 === 0) status(`Suche den Ball … ${Math.round(100 * k / nFrames)} %`);
       for (const c of blobs(k, g0)) {
         z.flecken++;
-        if (mean(gp, g0, c.pix) > 12) { z.bewegt++; continue; }                       // muss ruhig liegen
+        // Schwellen am eigenen Kontrast des Flecks ausrichten: ein schwacher Ball (Schatten) aendert das Bild
+        // beim Verschwinden auch nur schwach
+        const ruhigMax = Math.min(12, Math.max(5, 0.45 * c.kon)), wegMin = Math.min(25, Math.max(9, 0.6 * c.kon));
+        if (mean(gp, g0, c.pix) > ruhigMax) { z.bewegt++; continue; }                       // muss ruhig liegen
         const gone1 = mean(g1, g0, c.pix), gone3 = mean(g3, g0, c.pix);
-        if (gone1 < 25 || gone3 < 25) { z.nichtWeg++; continue; }                     // muss weg sein und weg bleiben
+        if (gone1 < wegMin || gone3 < wegMin) { z.nichtWeg++; continue; }                     // muss weg sein und weg bleiben
         z.kandidaten++;
         const hell = 255; // Helligkeit zaehlt nicht mehr: der Ball darf auch dunkler oder nur andersfarbig sein
         const mot = boxMot(g1, g0, c.x, c.y, 3 * c.r + 4);                             // Schlaeger und Haende rund um den Ball
@@ -1046,8 +1057,12 @@ async function autoBall() {
         if (!best || score > best.score) best = kand;
       }
     }
-    autoInfo = `Suche: ${z.bilder} Zeitpunkte, ${z.flecken} helle runde Flecken, davon ${z.bewegt} nicht ruhig, ${z.nichtWeg} nicht verschwunden, ${z.kandidaten} mögliche Treffer. Stärkste Bildänderung ${z.bew.toFixed(1)}, Sprünge ohne Antwort ${seekTimeouts - to0}, Dauer ${Math.round((Date.now() - t0) / 1000)} s.`;
+    if (alle.length) break;
+    }
+    const empfindlich = kTh < 18;
+    autoInfo = `Suche: ${z.bilder} Zeitpunkte, ${z.flecken} runde Flecken, davon ${z.bewegt} nicht ruhig, ${z.nichtWeg} nicht verschwunden, ${z.kandidaten} mögliche Treffer. Stärkste Bildänderung ${z.bew.toFixed(1)}, Sprünge ohne Antwort ${seekTimeouts - to0}, Dauer ${Math.round((Date.now() - t0) / 1000)} s.`;
     if (!best) { await gotoFrame(2); return false; }
+    if (empfindlich) autoInfo += ' Gefunden erst mit empfindlicher Suche (schwacher Kontrast).';
     // Alle Kandidaten behalten (nach Wertung, ohne Doppelte an derselben Stelle);
     // welcher wirklich wegfliegt, entscheidet spaeter die Verfolgung.
     alle.sort((p, q) => q.score - p.score);
@@ -1062,7 +1077,7 @@ async function autoBall() {
       let start = kd.k;
       for (let j = 6; j >= 1; j--) {
         const n = kd.k - j * step; if (n < 0) continue;
-        if (mean(await grabSmall(n), gk, kd.c.pix) <= 12) { start = n; break; }
+        if (mean(await grabSmall(n), gk, kd.c.pix) <= Math.min(12, Math.max(5, 0.45 * kd.c.kon))) { start = n; break; }
       }
       await gotoFrame(start);
       const b = refineBall(kd.x, kd.y);
@@ -1103,7 +1118,7 @@ function refineBall(tx, ty) {
     if (Math.hypot(x - lx, y - ly) > R) continue;
     const v = dist((y * win + x) * 4, bgc); if (v > bv) { bv = v; bi = y * win + x; }
   }
-  if (bi < 0 || bv < 25) return { x: tx, y: ty, d: Math.max(10, W / 50), unsure: true };
+  if (bi < 0 || bv < 16) return { x: tx, y: ty, d: Math.max(10, W / 50), unsure: true };
   // Ballfarbe: Mittel um den Startpunkt
   const bc = [0, 0, 0]; let nb = 0;
   for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) {
@@ -1243,7 +1258,7 @@ $('diag').addEventListener('click', async () => {
   const mean = g => pix.reduce((a, q) => a + Math.abs(g[q] - g0[q]), 0) / Math.max(1, pix.length);
   const kontrast = bn ? bs / bn - us / un : 0;
   await gotoFrame(k);
-  status(`Prüfung Bild ${k}: Ballhelligkeit ${Math.round(bs / Math.max(1, bn))}, Kontrast ${de(kontrast, 0)} (Suche braucht > 18), ruhig ${de(mean(gp), 0)} (braucht ≤ 12), weg nach 1/30 s ${de(mean(g1), 0)} und nach 3/30 s ${de(mean(g3), 0)} (beide brauchen ≥ 25), Ball ${Math.round(ball.d)} px.`);
+  status(`Prüfung Bild ${k}: Ballhelligkeit ${Math.round(bs / Math.max(1, bn))}, Kontrast ${de(kontrast, 0)} (Suche braucht > 18, empfindlich > 11), ruhig ${de(mean(gp), 0)} (braucht ≤ 12), weg nach 1/30 s ${de(mean(g1), 0)} und nach 3/30 s ${de(mean(g3), 0)} (beide brauchen ≥ 25, bei schwachem Kontrast ≥ 0,6 × Kontrast), Ball ${Math.round(ball.d)} px.`);
 });
 
 let mode = 'start', lastTreff = null;
