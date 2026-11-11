@@ -198,6 +198,12 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
     <button id="zoneset" disabled>Zone festlegen</button>
     <button id="zonedel" disabled>Löschen</button>
   </div>
+  <div class="ballrow">
+    <span id="horinfo">Horizont: nicht festgelegt</span>
+    <button id="horset" disabled>Horizont festlegen</button>
+    <button id="hordel" disabled>Löschen</button>
+  </div>
+  <p class="hint">Horizont: zwei Punkte weit links und rechts auf der fernen Kante des Geländes antippen (dort, wo der flache Boden endet). Daraus ergibt sich die Neigung der Kamera direkt – der Abschusswinkel hängt dann nicht mehr von der eingetragenen Kamerahöhe ab. Gilt, solange die Kamera nicht bewegt wird.</p>
     <div class="go"><button class="primary" id="run" disabled>Ball verfolgen</button></div>
   </details>
 </section>
@@ -878,12 +884,36 @@ function seekFrame(n) {
 let zone = null;
 try { zone = JSON.parse(localStorage.getItem('birdino.ballspur.zone') || 'null'); } catch (e) {}
 const zoneR = () => 0.08 * Math.max(W, H);
+// Horizont: zwei Punkte (relativ zur Bildgroesse), einmal pro Aufbau. Liefert Neigung und seitliche Verkippung.
+let horizont = null, horTmp = null, horNutz = null;
+try { horizont = JSON.parse(localStorage.getItem('birdino.ballspur.horizont') || 'null'); } catch (e) {}
+function horInfo() {
+  if (!$('horinfo')) return;
+  $('horinfo').textContent = horizont ? 'Horizont: festgelegt – Neigung daraus' : 'Horizont: nicht festgelegt';
+  $('hordel').disabled = !horizont || busy || !W; $('horset').disabled = busy || !W;
+}
+// Abstand der Bildmitte von der Horizontlinie (positiv: Horizont unter der Mitte = Kamera schaut nach oben) und Verkippung
+function horGeom() {
+  if (!horizont || !W) return null;
+  let a = horizont[0], b = horizont[1]; if (a.x > b.x) { const t = a; a = b; b = t; }
+  const x1 = a.x * W, y1 = a.y * H, dx = b.x * W - x1, dy = b.y * H - y1, len = Math.hypot(dx, dy);
+  if (len < 0.15 * W) return null;
+  return { dist: ((x1 - W / 2) * (-dy) + (y1 - H / 2) * dx) / len, roll: Math.atan2(dy, dx) };
+}
 function zoneInfo() {
   $('zoneinfo').textContent = zone ? 'Abschlagzone: festgelegt – Suche nur dort' : 'Abschlagzone: keine (ganzes untere Bild)';
   $('zonedel').disabled = !zone || busy || !W; $('zoneset').disabled = busy || !W;
+  horInfo();
 }
 function drawView() {
   vctx.drawImage(video, 0, 0, W, H);
+  if (horizont || horTmp) {
+    vctx.save(); vctx.lineWidth = Math.max(2, W / 400); vctx.strokeStyle = '#3FB6FF'; vctx.fillStyle = '#3FB6FF';
+    if (horizont) { const a = horizont[0], b = horizont[1], dx = (b.x - a.x) * W, dy = (b.y - a.y) * H;
+      vctx.setLineDash([W / 50, W / 80]); vctx.beginPath(); vctx.moveTo(a.x * W - 3 * dx, a.y * H - 3 * dy); vctx.lineTo(b.x * W + 3 * dx, b.y * H + 3 * dy); vctx.stroke(); }
+    for (const p of horizont || [horTmp]) { vctx.beginPath(); vctx.arc(p.x * W, p.y * H, Math.max(5, W / 120), 0, Math.PI * 2); vctx.fill(); }
+    vctx.restore();
+  }
   if (zone) {
     vctx.save(); vctx.setLineDash([W / 60, W / 90]); vctx.lineWidth = Math.max(3, W / 300);
     vctx.strokeStyle = '#F08A24'; vctx.beginPath(); vctx.arc(zone.x * W, zone.y * H, zoneR(), 0, Math.PI * 2); vctx.stroke(); vctx.restore();
@@ -977,6 +1007,103 @@ function updateBallInfo() {
 // Gesucht ist ein heller, runder Fleck, der ruhig liegt und dann ploetzlich verschwindet,
 // waehrend um ihn herum heftige Bewegung ist (Schlaeger). Das funktioniert auch, wenn der Ball
 // erst spaeter aufgelegt wird oder andere Baelle herumliegen - und genauso spaeter live im Ringpuffer.
+// Sucht den Ball ueber sein VERSCHWINDEN statt ueber sein Aussehen: Stellen, die vorher ruhig waren (gp ~ g0)
+// und danach dauerhaft anders sind (g1 und g3 beide anders als g0). Das haengt nicht davon ab, wie sich der Ball
+// vom Hintergrund abhebt - er darf auch genau auf einer Hell-Dunkel-Kante liegen (Mattenrand, Schattengrenze).
+// Bilder: { g: Helligkeit, c: Farbkanal } in kleiner Aufloesung w x h. Rueckgabe: Flecken wie components().
+function wegFlecken(gp, g0, g1, g3, w, h, th, yMin) {
+  const m = new Uint8Array(w * h), wert = new Float32Array(w * h);
+  const dd = (a, b, i) => Math.max(Math.abs(a.g[i] - b.g[i]), Math.abs(a.c[i] - b.c[i]));
+  for (let y = Math.max(1, yMin | 0); y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x, v = Math.min(dd(g1, g0, i), dd(g3, g0, i));
+    if (v > th && dd(gp, g0, i) < Math.max(6, 0.5 * v)) { m[i] = 1; wert[i] = v; }
+  }
+  const out = [];
+  for (const c of components(openMask(m, w, h), w, h)) {
+    if (c.a < 12) continue;
+    let ks = 0, top = h; for (const q of c.pix) { ks += wert[q]; const yy = (q / w) | 0; if (yy < top) top = yy; }
+    // Mitte senkrecht von der Oberkante aus: fliegt das Tee mit weg, haengt es unten am Fleck
+    out.push({ ...c, kon: ks / c.pix.length, yBall: Math.min(c.y, top + c.dm / 2), weg: true });
+  }
+  return out;
+}
+
+// ---- Flugsuche: nicht den ruhenden Ball suchen, sondern das, was nach dem Schlag im Bild aufsteigt ----
+// fr: aufeinanderfolgende kleine Bilder [{ f, g, c }], ref: Bild kurz davor. Sucht Ketten kleiner Flecken, die
+// Bild fuer Bild geradlinig nach oben wandern und dabei nicht groesser werden. Der Schlaegerkopf faellt heraus,
+// weil er einen Bogen beschreibt; Golfer und Schaft, weil sie zu gross oder zu lang sind.
+function flugKette(fr, ref, w, h, T) {
+  const dd = (a, b, i) => Math.max(Math.abs(a.g[i] - b.g[i]), Math.abs(a.c[i] - b.c[i]));
+  const F = [];
+  for (let n = 1; n < fr.length; n++) {
+    const m = new Uint8Array(w * h), a = fr[n], p = fr[n - 1];
+    for (let i = 0; i < w * h; i++) if (dd(a, ref, i) > T && dd(a, p, i) > T) m[i] = 1;
+    let cs = [];
+    for (const c of components(m, w, h, 4, 2500)) {
+      if (c.dm > 45 || c.dm < 0.35 * 2 * c.r - 1) continue;      // zu gross oder sehr lang (Schaft, Arm)
+      cs.push({ f: a.f, n, x: c.x, y: c.y, d: c.dm, a: c.a });
+    }
+    if (cs.length > 50) { cs.sort((p_, q_) => q_.a - p_.a); cs = cs.slice(0, 50); }
+    F.push(cs);
+  }
+  const gerade = pts => {   // Abweichung von der Geraden (Hauptachse) und deren Richtung
+    const k = pts.length; let mx = 0, my = 0; for (const p of pts) { mx += p.x; my += p.y; } mx /= k; my /= k;
+    let sxx = 0, syy = 0, sxy = 0; for (const p of pts) { const dx = p.x - mx, dy = p.y - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+    const wi = 0.5 * Math.atan2(2 * sxy, sxx - syy), ex = Math.cos(wi), ey = Math.sin(wi);
+    let mxAbw = 0; for (const p of pts) mxAbw = Math.max(mxAbw, Math.abs(-(p.x - mx) * ey + (p.y - my) * ex));
+    return { mx, my, ex, ey, abw: mxAbw };
+  };
+  let best = null;
+  for (let i = 0; i + 1 < F.length; i++) for (const A of F[i]) for (let j = i + 1; j <= i + 2 && j < F.length; j++) for (const B of F[j]) {
+    const gap = j - i, vx0 = (B.x - A.x) / gap, vy0 = (B.y - A.y) / gap, sp = Math.hypot(vx0, vy0);
+    if (vy0 > -0.4 || sp > 5 * A.d + 6 || sp < 0.5) continue;      // muss steigen, darf nicht springen
+    if (B.d > 1.25 * A.d + 1 || B.d < 0.45 * A.d - 1) continue;
+    const tr = [A, B]; let vx = vx0, vy = vy0, last = B, li = j, miss = 0;
+    for (let k = j + 1; k < F.length && miss < 3; k++) {
+      const st = k - li, px = last.x + vx * st, py = last.y + vy * st, rad = Math.max(2.5, 0.5 * Math.hypot(vx, vy) + 0.8 * last.d) * (1 + 0.3 * miss);
+      let bc = null, bd = 1e9;
+      for (const c of F[k]) {
+        if (c.d > 1.25 * last.d + 1 || c.d < 0.45 * last.d - 1) continue;
+        if (c.y > last.y + 1) continue;                               // faellt nicht zurueck
+        const d = Math.hypot(c.x - px, c.y - py); if (d < rad && d < bd) { bd = d; bc = c; }
+      }
+      if (!bc) { miss++; continue; }
+      vx = 0.5 * vx + 0.5 * (bc.x - last.x) / st; vy = 0.5 * vy + 0.5 * (bc.y - last.y) / st;
+      tr.push(bc); last = bc; li = k; miss = 0;
+    }
+    if (tr.length < 6) continue;
+    const g = gerade(tr.slice(0, 14)), steig = tr[0].y - tr[tr.length - 1].y;
+    if (g.abw > Math.max(1.5, 0.2 * tr[0].d)) continue;               // Bogen -> Schlaegerkopf
+    if (steig < Math.max(12, 2 * tr[0].d)) continue;                   // muss wirklich aufsteigen
+    if (tr[tr.length - 1].d > 0.95 * tr[0].d + 0.5) continue;          // muss kleiner werden (entfernt sich)
+    const wert = tr.length;
+    if (!best || wert > best.wert) best = { tr, wert, g };
+  }
+  return best;
+}
+
+// Von der Flugspur zurueck zur Ruhestelle: Auf der rueckwaerts verlaengerten Geraden liegt die Stelle, an der vor
+// dem Schlag etwas ruhig lag, das danach fehlt. vor2/vor1: zwei Bilder vor dem Schlag, nach1/nach2: zwei danach.
+function ruheAufLinie(kette, vor2, vor1, nach1, nach2, w, h) {
+  const { tr, g } = kette, P = tr[0];
+  // Richtung rueckwaerts (entgegen dem Flug)
+  let ux = tr[0].x - tr[Math.min(tr.length - 1, 8)].x, uy = tr[0].y - tr[Math.min(tr.length - 1, 8)].y;
+  if (ux * g.ex + uy * g.ey < 0) { g.ex = -g.ex; g.ey = -g.ey; }
+  let best = null;
+  for (const th of [16, 10]) {
+    for (const c of wegFlecken(vor2, vor1, nach1, nach2, w, h, th, 0)) {
+      const rx = c.x - P.x, ry = c.yBall - P.y, laengs = rx * g.ex + ry * g.ey, quer = Math.abs(-rx * g.ey + ry * g.ex);
+      if (laengs < -0.5 * c.dm) continue;                               // liegt nicht hinter dem ersten Flugpunkt
+      if (quer > Math.max(3, 0.7 * c.dm) + 0.06 * Math.max(0, laengs)) continue;   // nicht auf der Linie
+      if (c.dm < 0.8 * P.d || c.dm > 6 * P.d + 6 || c.dm < 0.45 * 2 * c.r - 1) continue;   // Ruheball ist mindestens so gross wie im Flug
+      const rund = c.a / (Math.PI * c.r * c.r), wert = Math.min(rund, 0.8) * Math.min(c.kon, 80) / (1 + quer / c.dm);
+      if (!best || wert > best.wert) best = { c, wert, quer, laengs };
+    }
+    if (best) break;
+  }
+  return best;
+}
+
 async function autoBall() {
   try {
     const sc = Math.min(1, 640 / Math.max(W, H)), w = Math.round(W * sc), h = Math.round(H * sc);
@@ -1029,15 +1156,65 @@ async function autoBall() {
     let best = null, alle = [];
     // Zwei Durchgaenge: erst mit der normalen Kontrastschwelle, dann - nur wenn nichts gefunden wurde - empfindlicher
     // (Ball im Schatten hebt sich oft nur schwach vom Rasen ab).
-    for (kTh of [18, 11]) {
+    // ---- 1) Flugsuche: erst den Schlag finden (staerkste Bewegung), dort die aufsteigende Spur, dann zurueck zur Ruhestelle
+    let flug = null, flugInfo = 'Flugsuche: ';
+    {
+      const bew = []; let vor = await grabSmall(0);
+      for (let k = step; k < nFrames; k += step) {
+        const a = await grabSmall(k); let su = 0, nn = 0;
+        for (let i = 0; i < a.g.length; i += 5) { su += Math.abs(a.g[i] - vor.g[i]); nn++; }
+        bew.push({ k, v: su / nn }); cache.delete(k - step); vor = a;
+        if (bew.length % 10 === 0) status(`Suche den Schlag … ${Math.round(100 * k / nFrames)} %`);
+      }
+      bew.sort((p, q) => q.v - p.v);
+      const spitzen = [];
+      for (const b of bew) { if (b.v < 0.4) break; if (spitzen.some(o => Math.abs(o.k - b.k) < 20 * step)) continue; spitzen.push(b); if (spitzen.length >= 4) break; }
+      let ketten = 0, letzte = null;
+      for (let si = 0; si < spitzen.length && !flug; si++) {
+        const pk = spitzen[si];
+        const a = Math.max(2 * step, pk.k - 6 * step), b = Math.min(nFrames - 1, pk.k + 4 * step);
+        status(`Suche den Ballflug … (Stelle ${si + 1} von ${spitzen.length})`);
+        cache.clear();
+        const ref = await grabSmall(a - 2 * step), fr = [];
+        for (let n = a; n <= b; n++) fr.push({ f: n, ...(await grabSmall(n)) });
+        const ke = flugKette(fr, ref, w, h, 14);
+        if (!ke) continue;
+        ketten++; letzte = ke;
+        const f1 = ke.tr[0].f;
+        const ru = ruheAufLinie(ke, await grabSmall(f1 - 5 * step), await grabSmall(f1 - 4 * step), await grabSmall(f1 + step), await grabSmall(f1 + 3 * step), w, h);
+        if (!ru) continue;
+        const c = { ...ru.c, y: ru.c.yBall, dFull: ru.c.dm / sc, rund: ru.c.a / (Math.PI * ru.c.r * ru.c.r), weg: true };
+        flug = { score: 1e9, k: Math.max(0, f1 - 4 * step), c, x: c.x / sc, y: c.y / sc };
+        flugInfo += `aufsteigende Spur aus ${ke.tr.length} Punkten ab Bild ${f1}, Ruhestelle auf der Linie gefunden.`;
+      }
+      if (!flug) flugInfo += !spitzen.length ? 'keine Bewegung im Video.' : !ketten ? `keine aufsteigende Spur an ${spitzen.length} Stellen mit Bewegung.` : `aufsteigende Spur (${letzte.tr.length} Punkte ab Bild ${letzte.tr[0].f}), aber keine Ruhestelle auf der Linie.`;
+      cache.clear();
+    }
+    // ---- 2) nur wenn das nichts ergibt: bisherige Suche nach dem ruhenden Ball
+    for (kTh of flug ? [] : [18, 11]) {
     cache.clear(); blobCache.clear(); best = null; alle = [];
-    z = { bilder: 0, flecken: 0, bewegt: 0, nichtWeg: 0, kandidaten: 0, bew: 0 };
+    z = { bilder: 0, flecken: 0, bewegt: 0, nichtWeg: 0, kandidaten: 0, bew: 0, wegF: 0 };
     for (let k = step; k + 3 * step < nFrames; k += step) {
       for (const key of cache.keys()) if (key < k - step) { cache.delete(key); blobCache.delete(key); }   // Speicher frei halten
       const gp = await grabSmall(k - step), g0 = await grabSmall(k), g1 = await grabSmall(k + step), g3 = await grabSmall(k + 3 * step);
       z.bilder++;
       { let su = 0; for (let i = 0; i < g0.g.length; i += 7) su += Math.abs(g1.g[i] - g0.g[i]); z.bew = Math.max(z.bew, su / (g0.g.length / 7)); }
       if (z.bilder % 10 === 0) status(`Suche den Ball … ${Math.round(100 * k / nFrames)} %`);
+      // Kandidaten aus dem Verschwinden (unabhaengig vom Aussehen des Balls)
+      for (const c0 of wegFlecken(gp, g0, g1, g3, w, h, kTh, zone ? 0 : 0.45 * h)) {
+        const dFull = c0.dm / sc, rund = c0.a / (Math.PI * c0.r * c0.r);
+        if (dFull < 10 || dFull > 120 || c0.dm < 0.45 * 2 * c0.r - 1) continue;        // Ballgroesse, nicht langgezogen
+        if (zone && Math.hypot(c0.x / sc - zone.x * W, c0.yBall / sc - zone.y * H) > zoneR()) continue;
+        z.wegF++;
+        const c = { ...c0, y: c0.yBall, dFull, rund };
+        const gone1 = mean(g1, g0, c.pix);
+        const mot = boxMot(g1, g0, c.x, c.y, 3 * c.r + 4);
+        const mx_ = ((c.x / sc) - W / 2) / (0.35 * W), mitte = Math.exp(-(mx_ * mx_)), gr = Math.min(1, dFull / 22);
+        const score = Math.min(Math.max(rund, 0.45), 0.8) * Math.min(gone1, 100) * mitte * gr * gr * (1 + Math.min(mot, 60) / 20);
+        const kand = { score, k, c, x: c.x / sc, y: c.y / sc };
+        alle.push(kand); z.kandidaten++;
+        if (!best || score > best.score) best = kand;
+      }
       for (const c of blobs(k, g0)) {
         z.flecken++;
         // Schwellen am eigenen Kontrast des Flecks ausrichten: ein schwacher Ball (Schatten) aendert das Bild
@@ -1060,7 +1237,8 @@ async function autoBall() {
     if (alle.length) break;
     }
     const empfindlich = kTh < 18;
-    autoInfo = `Suche: ${z.bilder} Zeitpunkte, ${z.flecken} runde Flecken, davon ${z.bewegt} nicht ruhig, ${z.nichtWeg} nicht verschwunden, ${z.kandidaten} mögliche Treffer. Stärkste Bildänderung ${z.bew.toFixed(1)}, Sprünge ohne Antwort ${seekTimeouts - to0}, Dauer ${Math.round((Date.now() - t0) / 1000)} s.`;
+    autoInfo = `Suche: ${z.bilder} Zeitpunkte, ${z.flecken} runde Flecken, davon ${z.bewegt} nicht ruhig, ${z.nichtWeg} nicht verschwunden; ${z.wegF || 0} verschwundene Flecken in Ballgröße; ${z.kandidaten} mögliche Treffer. Stärkste Bildänderung ${z.bew.toFixed(1)}, Sprünge ohne Antwort ${seekTimeouts - to0}, Dauer ${Math.round((Date.now() - t0) / 1000)} s.`;
+    if (flug) { alle = [flug]; best = flug; autoInfo = flugInfo; } else autoInfo = flugInfo + ' ' + autoInfo;
     if (!best) { await gotoFrame(2); return false; }
     if (empfindlich) autoInfo += ' Gefunden erst mit empfindlicher Suche (schwacher Kontrast).';
     // Alle Kandidaten behalten (nach Wertung, ohne Doppelte an derselben Stelle);
@@ -1081,7 +1259,8 @@ async function autoBall() {
       }
       await gotoFrame(start);
       const b = refineBall(kd.x, kd.y);
-      if (!b.unsure) autoCands.push({ x: b.x, y: b.y, d: b.d, frame: start, auto: true });
+      if (!b.unsure && (!kd.c.weg || (Math.hypot(b.x - kd.x, b.y - kd.y) < 0.6 * kd.c.dFull && b.d > 0.6 * kd.c.dFull && b.d < 1.6 * kd.c.dFull))) autoCands.push({ x: b.x, y: b.y, d: b.d, frame: start, auto: true });
+      else if (kd.c.weg) autoCands.push({ x: kd.x, y: kd.y, d: kd.c.dFull, frame: start, auto: true });
     }
     if (!autoCands.length) { autoInfo += ' Feinbestimmung unsicher.'; return false; }
     if (autoCands.length > 1) autoInfo += ` ${autoCands.length} mögliche Bälle – beim Verfolgen wird geprüft, welcher wegfliegt.`;
@@ -1153,6 +1332,22 @@ function tapAt(clientX, clientY) {
   if (busy) { status('Bitte kurz warten – die App rechnet noch. Danach kannst du den Ball antippen.', true); return; }
   const r = view.getBoundingClientRect();
   const tx = (clientX - r.left) / r.width * W, ty = (clientY - r.top) / r.height * H;
+  if (mode === 'hor1') {
+    horTmp = { x: tx / W, y: ty / H }; mode = 'hor2'; drawView();
+    status('Jetzt den zweiten Punkt auf dem Horizont antippen – möglichst weit vom ersten entfernt.');
+    return;
+  }
+  if (mode === 'hor2') {
+    const p2 = { x: tx / W, y: ty / H };
+    if (Math.abs(p2.x - horTmp.x) < 0.15) { status('Die beiden Punkte liegen zu nah beieinander. Bitte den zweiten Punkt weiter links oder rechts antippen.', true); return; }
+    horizont = [horTmp, p2]; horTmp = null; mode = 'start';
+    try { localStorage.setItem('birdino.ballspur.horizont', JSON.stringify(horizont)); } catch (e2) {}
+    horInfo(); drawView();
+    const hg = horGeom();
+    status(`Horizont gespeichert${hg ? ` (seitliche Verkippung ${de(hg.roll * 180 / Math.PI, 1)}°)` : ''}.${ball ? ' Werte neu aus …' : ''}`);
+    if (ball) runAnalysis(null);
+    return;
+  }
   if (mode === 'zone') {
     mode = 'start';
     zone = { x: tx / W, y: ty / H };
@@ -1238,6 +1433,16 @@ $('zoneset').addEventListener('click', () => {
   document.querySelector('.frame').scrollIntoView({ behavior: 'auto', block: 'center' });
   status('Auf die Stelle tippen, an der der Ball zum Schlagen liegt (z. B. am Tee). Der orange Kreis zeigt die Zone.');
 });
+$('horset').addEventListener('click', () => {
+  if (!W || busy) return;
+  mode = 'hor1'; horTmp = null; $('bildDetails').open = true;
+  document.querySelector('.frame').scrollIntoView({ behavior: 'auto', block: 'center' });
+  status('Ersten Punkt auf dem Horizont antippen: die ferne Kante des Geländes, weit links oder rechts im Bild.');
+});
+$('hordel').addEventListener('click', () => {
+  horizont = null; horTmp = null; try { localStorage.removeItem('birdino.ballspur.horizont'); } catch (e) {}
+  horInfo(); drawView(); status('Horizont gelöscht – die Neigung wird wieder aus Kamerahöhe und Abstand berechnet.');
+});
 $('zonedel').addEventListener('click', () => {
   zone = null; try { localStorage.removeItem('birdino.ballspur.zone'); } catch (e) {}
   zoneInfo(); drawView(); status('Abschlagzone gelöscht – die Suche nutzt wieder die ganze untere Bildhälfte.');
@@ -1309,10 +1514,27 @@ async function runAnalysis(seed) {
     // Die Ballgroesse im Bild haengt von der Tiefe laengs der Kameraachse ab (d = f*D/Z), nicht von der Entfernung.
     // Liegt der Ball abseits der Bildmitte (Abstand rPix), ist die Tiefe um cos(Winkel) kleiner als die Entfernung.
     const rPix = Math.hypot(cx0 - cx, cy0 - cy);
-    if (abIn > 0) { abstand = abIn; const q = d0 * Math.hypot(abstand, hoehe) / BALL_D; f = Math.sqrt(Math.max(q * q - rPix * rPix, 0.25 * q * q)); fQuelle = 'am Ball kalibriert'; abQuelle = 'gemessen'; }
-    else { f = Math.max(W, H) / 2 / Math.tan(hfov * Math.PI / 360); const Zc = f * BALL_D / d0, rho = Zc * Math.hypot(f, rPix) / f; abstand = Math.sqrt(Math.max(0.01, rho * rho - hoehe * hoehe)); fQuelle = `aus Bildwinkel ${de(hfov, 0)}°`; abQuelle = 'aus Ballgröße'; }
+    const brenn = hh => {
+      if (abIn > 0) { abstand = abIn; const q = d0 * Math.hypot(abstand, hh) / BALL_D; f = Math.sqrt(Math.max(q * q - rPix * rPix, 0.25 * q * q)); fQuelle = 'am Ball kalibriert'; abQuelle = 'gemessen'; }
+      else { f = Math.max(W, H) / 2 / Math.tan(hfov * Math.PI / 360); const Zc = f * BALL_D / d0, rho = Zc * Math.hypot(f, rPix) / f; abstand = Math.sqrt(Math.max(0.01, rho * rho - hh * hh)); fQuelle = `aus Bildwinkel ${de(hfov, 0)}°`; abQuelle = 'aus Ballgröße'; }
+    };
+    brenn(hoehe);
+    // Mit festgelegtem Horizont ist die Neigung direkt messbar: Winkel zwischen Bildmitte und Horizont.
+    // Der Ball liegt dann um (Winkel des Balls unter der Bildmitte - Neigung) unter der Waagerechten;
+    // mit dem Abstand ergibt das die Kamerahoehe - die eingetragene Hoehe wird nicht mehr gebraucht.
+    let hoeheEff = hoehe; horNutz = null;
+    const hg = horGeom();
+    if (hg) {
+      let ok = true, hh = hoehe;
+      for (let it = 0; it < 4 && ok; it++) {
+        const alH = Math.atan(hg.dist / f), tief = Math.atan((cy0 - cy) / f) - alH;
+        if (tief < 0.3 * Math.PI / 180 || tief > 80 * Math.PI / 180) { ok = false; break; }   // Ball laege ueber dem Horizont
+        hh = abstand * Math.tan(tief); brenn(hh);
+      }
+      if (ok) { hoeheEff = hh; horNutz = { roll: hg.roll, hoehe: hh }; } else { brenn(hoehe); horNutz = { fehler: true, roll: hg.roll }; }
+    }
     const hfovEff = 2 * Math.atan(Math.max(W, H) / 2 / f) * 180 / Math.PI;
-    const { al, B } = kameraLage([cx0, cy0], f, cx, cy, abstand, hoehe);
+    const { al, B } = kameraLage([cx0, cy0], f, cx, cy, abstand, hoeheEff);
     const vF = speed > 0 ? speed / 3.6 : null;
     // Rohes Grau (ohne Weichzeichnen) fuer die Feinsuche nach dem kleinen Ball
     const grabRaw = async (n, rx, ry, rw) => {
@@ -1404,7 +1626,8 @@ async function runAnalysis(seed) {
     `Startbild ${ball.frame}, Ball bei (${Math.round(cx0)}, ${Math.round(cy0)}), ${Math.round(d0)} px`,
     `Treffmoment: Bild ${out.treff}`,
     `Ball gefunden in ${out.track.length} Bildern${out.ohneHell ? ' (Spurwahl ohne Helligkeitspruefung: Ball sieht im Flug anders aus als in Ruhe)' : ''}`,
-    `Kamera-Neigung (berechnet): ${al >= 0 ? '+' : ''}${de(al * 180 / Math.PI)} Grad`,
+    `Kamera-Neigung (${horNutz && !horNutz.fehler ? 'aus dem Horizont' : 'berechnet aus Höhe und Abstand'}): ${al >= 0 ? '+' : ''}${de(al * 180 / Math.PI)} Grad`,
+    ...(horNutz ? [horNutz.fehler ? 'Horizont nicht verwendet: Der Ball läge über dem Horizont – Punkte neu setzen.' : `Horizont: Kamerahöhe daraus ${de(horNutz.hoehe, 2)} m über Ballmitte (eingetragen ${de(hoehe, 2)} m), seitliche Verkippung ${de(horNutz.roll * 180 / Math.PI, 1)}° (wird nicht korrigiert)`] : []),
     `STARTRICHTUNG: ${de(Math.abs(ph))} Grad ${ph > 0 ? 'rechts' : 'links'}`,
     `ABSCHUSSWINKEL: ${de(th)} Grad`,
     vF ? `Ballspeed vorgegeben: ${de(speed, 0)} km/h, Zeitversatz ${de(fit.p[2] * 1000)} ms` : `Ballspeed (nur grob aus Bild): ${de(fit.p[2] * 3.6, 0)} km/h`,
