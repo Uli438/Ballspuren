@@ -145,7 +145,7 @@ dialog::backdrop{background:rgba(0,0,0,.55)}
   <h2><span class="n">2</span>Ergebnis</h2>
   <div class="board">
     <div><b id="rDir">–</b><span>Startrichtung</span><span class="sub" id="rDirSub"></span></div>
-    <div><b id="rLaunch">–</b><span>Abschuss</span></div>
+    <div><b id="rLaunch">–</b><span>Abschuss</span><span class="sub" id="rLaunchSub"></span></div>
     <div><b id="rSpeed">–</b><span>Ballspeed</span><span class="sub" id="rSpeedSub"></span></div>
   </div>
   <div class="board">
@@ -763,52 +763,113 @@ function lm(res, x0, lo, hi) {
   return { x, c, r };
 }
 
-function anpassen(track, treff, fps, f, cx, cy, al, B, vFest, ohneVersatz) {
-  // Ohne Radar ist der Treffmoment oft 1-2 Bilder zu frueh erkannt. Der Zeitversatz (in Bildern) wird als
-  // letzter Parameter mitgeschaetzt und schwach an 0 gebunden; er wirkt auf die Zeiten selbst, also auch
-  // bei echten Zeitstempeln (p.t). Mit Radar steckt der Versatz schon in p[2].
+// Bahnanpassung, robust:
+//  - Ausreisser (Schlaegerpunkte, haengende Punkte, Fehlmessungen) werden erkannt und nicht mitgerechnet
+//  - Kurve und Auftrieb sind an physikalisch uebliche Werte gebunden und werden nur bei genug Flugzeit geschaetzt
+//  - ohne geschaetzten Auftrieb rechnet die Bahn mit ueblichem Backspin statt ganz ohne
+//  - zu jedem Wert gibt es eine Unsicherheit (sig), damit die Anzeige wacklige Werte kennzeichnen kann
+// Rueckgabe: p = [Abschuss, Richtung, Speed (bzw. Zeitversatz mit Radar), Kurve, Auftrieb], t passend zu track
+// Ueblicher Auftrieb (Backspin) als Anteil von v²: flache Schlaege (Driver, duenn getroffen) haben wenig Spin,
+// steile (Wedge) viel. th = Abschusswinkel im Bogenmass.
+const klTyp = th => Math.min(0.0056, Math.max(0.0022, 0.0012 + 0.00016 * th * 180 / Math.PI));
+function anpassen(track, treff, fps, f, cx, cy, al, B, vFest, ohneVersatz, opt) {
+  opt = opt || {};
+  const n = track.length, rad = Math.PI / 180;
   const mitDt = vFest == null && !ohneVersatz;
   const t0 = track.map(p => p.t != null ? p.t : (p.f - treff + 0.5) / fps);
-  let t = t0;
   const obs = track.map(p => [p.x, p.y]);
   // Ballgroesse als zusaetzliche Messung der Entfernung: d = f * 42,67 mm / Tiefe.
-  // Kleine Baelle sind ungenau und zaehlen weniger, unter 6 px gar nicht.
-  // Bewegungsunschaerfe macht schnelle Baelle im Bild groesser: je schneller, desto weniger Gewicht.
-  const vimg = track.map((p, k) => { const a = track[Math.max(0, k - 1)], b = track[Math.min(track.length - 1, k + 1)];
+  // Kleine Baelle sind ungenau und zaehlen weniger, unter 6 px gar nicht; schnelle (verwischte) ebenfalls weniger.
+  const vimg = track.map((p, k) => { const a = track[Math.max(0, k - 1)], b = track[Math.min(n - 1, k + 1)];
     return Math.hypot(b.x - a.x, b.y - a.y) / Math.max(1, b.f - a.f); });
   const sw = track.map((p, k) => (p.d >= 10 ? 1 : p.d >= 6 ? 0.5 : 0) / (1 + vimg[k] / Math.max(p.d, 1)));
-  // Gemessene Durchmesser haben je nach Kontrast einen festen Fehler (Rand, Unschaerfe):
-  // ein gemeinsamer Groessenfaktor wird mitgeschaetzt, die Groessen-AENDERUNG traegt die Information.
+  const use = new Array(n).fill(1);
+  // gemeinsamer Groessenfaktor: gemessene Durchmesser haben je nach Kontrast einen festen Fehler
   const sizeScale = pr => { let a = 0, b = 0;
-    pr.forEach((q, k) => { if (!sw[k]) return; const dp = f * BALL_D / q[2]; a += sw[k] * sw[k] * track[k].d * dp; b += sw[k] * sw[k] * dp * dp; });
+    pr.forEach((q, k) => { if (!sw[k] || !use[k]) return; const dp = f * BALL_D / q[2]; a += sw[k] * sw[k] * track[k].d * dp; b += sw[k] * sw[k] * dp * dp; });
     return b ? Math.min(1.5, Math.max(0.7, a / b)) : 1; };
-  // Bindung des Zeitversatzes: waechst mit der Spurlaenge, damit lange Spuren sie nicht ueberstimmen
-  const wDt = 1.2 * Math.sqrt(Math.max(1, track.length / 25));
-  const res = x => {
-    let p = x, tt = t0, dt = 0;
-    if (mitDt) { dt = x[x.length - 1]; p = x.slice(0, -1); tt = t0.map(v => v - dt / fps); }
-    const pr = projiziere(bahn(p, tt, B, vFest), f, cx, cy, al), o = [], sc = sizeScale(pr);
-    pr.forEach((q, k) => { o.push(q[0] - obs[k][0], q[1] - obs[k][1]); if (sw[k]) o.push(sw[k] * (sc * f * BALL_D / q[2] - track[k].d)); });
-    if (mitDt) o.push(wDt * dt);
-    return o; };
-  const rad = Math.PI / 180;
-  let lo, hi, x0;
-  if (vFest == null) { lo = [-10 * rad, -30 * rad, 10]; hi = [60 * rad, 30 * rad, 90]; x0 = [15 * rad, 0, 50]; }
-  else { lo = [-10 * rad, -30 * rad, -1.5 / fps]; hi = [60 * rad, 30 * rad, 1.5 / fps]; x0 = [15 * rad, 0, 0]; }
-  // Ab 12 Punkten zusaetzlich die Seitenbeschleunigung (Kurve) schaetzen
-  if (track.length >= 12) { lo.push(-40); hi.push(40); x0.push(0); }
-  // Lange Spur (> 0,15 s): auch den Auftrieb durch Backspin schaetzen
-  if (track.length >= 12 && (t[t.length - 1] - t[0]) > 0.15) { lo.push(-5); hi.push(30); x0.push(3); }
-  if (mitDt) { lo.push(-2); hi.push(3); x0.push(0); }
-  let best = null;
-  for (const th0 of [5, 15, 30]) { x0[0] = th0 * rad; const r = lm(res, x0.slice(), lo, hi); if (!best || r.c < best.c) best = r; }
-  // Rueckgabe wie bisher: p ohne den Zeitversatz, t bereits verschoben -> bahn(p, t) passt fuer alle Aufrufer
-  let dtFrames = 0, pBest = best.x;
-  if (mitDt) { dtFrames = best.x[best.x.length - 1]; pBest = best.x.slice(0, -1); t = t0.map(v => v - dtFrames / fps); }
-  const pr = projiziere(bahn(pBest, t, B, vFest), f, cx, cy, al), gsc = sizeScale(pr);
-  let sp = 0, ss = 0, ns = 0;
-  pr.forEach((q, k) => { sp += (q[0] - obs[k][0]) ** 2 + (q[1] - obs[k][1]) ** 2; if (sw[k]) { ss += (gsc * f * BALL_D / q[2] - track[k].d) ** 2; ns++; } });
-  return { p: pBest, rms: Math.sqrt(sp / (2 * pr.length)), rmsD: ns ? Math.sqrt(ss / ns) : 0, t, gsc, cost: best.c, dtFrames };
+  const DT0 = opt.dt0 == null ? 0.7 : opt.dt0;   // der erkannte Treffmoment liegt im Mittel knapp ein Bild zu frueh
+  const einmal = (mitAL, mitAV) => {
+    const nU = use.reduce((a, b) => a + b, 0), wDt = 1.2 * Math.sqrt(Math.max(1, nU / 25));
+    const teile = x => { let i = 3; const o = { aL: mitAL ? x[i++] : 0 };
+      const v = vFest == null ? x[2] : vFest;
+      o.aV = mitAV ? x[i++] : klTyp(x[0]) * v * v; o.dt = mitDt ? x[i++] : 0; o.v = v;
+      o.p = [x[0], x[1], x[2], o.aL, o.aV]; o.tt = mitDt ? t0.map(q => q - o.dt / fps) : t0; return o; };
+    const res = x => {
+      const m = teile(x), pr = projiziere(bahn(m.p, m.tt, B, vFest), f, cx, cy, al), o = [], sc = sizeScale(pr);
+      pr.forEach((q, k) => { const u = use[k]; o.push(u * (q[0] - obs[k][0]), u * (q[1] - obs[k][1])); if (sw[k]) o.push(u * sw[k] * (sc * f * BALL_D / q[2] - track[k].d)); });
+      // Bindung an uebliche Werte: zaehlt wie eine Messung, verliert bei langen, sauberen Spuren an Einfluss
+      if (mitAL) o.push(2 * m.aL / Math.max(1.5, 0.0012 * m.v * m.v));
+      if (mitAV) o.push(2 * (m.aV - klTyp(x[0]) * m.v * m.v) / Math.max(1.5, 0.0017 * m.v * m.v));
+      if (mitDt) o.push(wDt * (m.dt - DT0));
+      return o; };
+    let lo, hi, x0;
+    if (vFest == null) { lo = [-10 * rad, -30 * rad, 10]; hi = [60 * rad, 30 * rad, 90]; x0 = [15 * rad, 0, 50]; }
+    else { lo = [-10 * rad, -30 * rad, -1.5 / fps]; hi = [60 * rad, 30 * rad, 1.5 / fps]; x0 = [15 * rad, 0, 0]; }
+    if (mitAL) { lo.push(-25); hi.push(25); x0.push(0); }
+    if (mitAV) { lo.push(-2); hi.push(25); x0.push(8); }
+    if (mitDt) { lo.push(-2); hi.push(3); x0.push(DT0); }
+    let best = null;
+    for (const th0 of [5, 15, 30]) { x0[0] = th0 * rad; const r = lm(res, x0.slice(), lo, hi); if (!best || r.c < best.c) best = r; }
+    const m = teile(best.x), pr = projiziere(bahn(m.p, m.tt, B, vFest), f, cx, cy, al);
+    return { x: best.x, c: best.c, m, pr, res, gsc: sizeScale(pr) };
+  };
+  const modell = () => {
+    const tu = t0.filter((q, k) => use[k]), nU = tu.length, dauer = nU ? tu[nU - 1] - tu[0] : 0;
+    return [nU >= 12 && dauer > 0.08, nU >= 20 && dauer > 0.2];
+  };
+  let e = einmal(...modell()), nAus = 0;
+  // Ausreisser aussortieren (nicht fuer die schnelle Vorhersage waehrend der Verfolgung)
+  if (!ohneVersatz && n >= 8) {
+    const med = a => { a = a.slice().sort((u, v) => u - v); return a.length ? a[a.length >> 1] : 0; };
+    // Kurze Spuren: falsche Punkte am Anfang (Schlaeger) oder Ende (haengen geblieben) verbiegen die ganze Bahn.
+    // Deshalb Varianten ohne die ersten/letzten Punkte rechnen und die nehmen, zu der die meisten Punkte passen.
+    if (n < 40) {
+      const guete = ee => med(ee.pr.map((q, k) => Math.hypot(q[0] - obs[k][0], q[1] - obs[k][1])).filter((q, k) => use[k]));
+      let bestG = guete(e), bestV = [0, 0];
+      for (const [a, b] of [[1, 0], [2, 0], [3, 0], [0, 3], [0, 5], [2, 3], [2, 5]]) {
+        if (n - a - b < 6) continue;
+        use.fill(1); for (let k = 0; k < a; k++) use[k] = 0; for (let k = n - b; k < n; k++) use[k] = 0;
+        const ev = einmal(...modell()), g = guete(ev);
+        if (g < 0.6 * bestG) { bestG = g; bestV = [a, b]; e = ev; }
+      }
+      use.fill(1); for (let k = 0; k < bestV[0]; k++) use[k] = 0; for (let k = n - bestV[1]; k < n; k++) use[k] = 0;
+      nAus = bestV[0] + bestV[1];
+    }
+    for (let runde = 0; runde < 3; runde++) {
+      const err = e.pr.map((q, k) => Math.hypot(q[0] - obs[k][0], q[1] - obs[k][1]));
+      const grenze = Math.max(2.5, 3 * med(err.filter((q, k) => use[k])));
+      const weg = []; err.forEach((q, k) => { if (use[k] && q > grenze) weg.push(k); });
+      weg.sort((a, b) => err[b] - err[a]);
+      const nU = use.reduce((a, b) => a + b, 0), darf = Math.max(0, nU - Math.max(6, Math.ceil(0.6 * n)));
+      let geaendert = false;
+      for (const k of weg.slice(0, darf)) { use[k] = 0; nAus++; geaendert = true; }
+      // Groessen-Ausreisser: Position behalten, nur die Groesse nicht mehr werten
+      const ds = e.pr.map((q, k) => (sw[k] && use[k]) ? e.gsc * f * BALL_D / q[2] - track[k].d : null), dv = ds.filter(q => q != null);
+      if (dv.length >= 6) { const mD = med(dv), mad = med(dv.map(q => Math.abs(q - mD))), gS = Math.max(2.5, 3.5 * 1.4826 * mad);
+        ds.forEach((q, k) => { if (q != null && Math.abs(q - mD) > gS) { sw[k] = 0; geaendert = true; } }); }
+      if (!geaendert) break;
+      e = einmal(...modell());
+    }
+  }
+  const [mitAL, mitAV] = modell();
+  // Unsicherheit der Werte aus der Kruemmung der Fehlerflaeche (wie stark duerfen sie wackeln, ohne schlechter zu passen)
+  const sig = { th: null, ph: null, v: null };
+  if (!ohneVersatz) {
+    const x = e.x, r0 = e.res(x), np = x.length, J = [];
+    for (let j = 0; j < np; j++) { const h = 1e-5 * Math.max(1, Math.abs(x[j])), xp = x.slice(); xp[j] += h; const rp = e.res(xp); J.push(rp.map((q, k) => (q - r0[k]) / h)); }
+    const A = [...Array(np)].map((_, a) => [...Array(np)].map((_, b) => { let su = 0; for (let k = 0; k < r0.length; k++) su += J[a][k] * J[b][k]; return su + (a === b ? 1e-9 : 0); }));
+    const mEff = r0.filter(q => q !== 0).length, s2 = Math.max(0.25, r0.reduce((a, q) => a + q * q, 0) / Math.max(1, mEff - np));
+    const diag = j => { const b = Array(np).fill(0); b[j] = 1; const c = solve(A, b); return c && c[j] > 0 ? Math.sqrt(s2 * c[j]) : null; };
+    const st = diag(0), sp = diag(1), sv = vFest == null ? diag(2) : null;
+    sig.th = st == null ? null : st / rad; sig.ph = sp == null ? null : sp / rad; sig.v = sv;
+  }
+  const t = e.m.tt;
+  let sp = 0, ss = 0, ns = 0, nu = 0;
+  e.pr.forEach((q, k) => { if (!use[k]) return; nu++; sp += (q[0] - obs[k][0]) ** 2 + (q[1] - obs[k][1]) ** 2; if (sw[k]) { ss += (e.gsc * f * BALL_D / q[2] - track[k].d) ** 2; ns++; } });
+  const tu = t.filter((q, k) => use[k]);
+  return { p: e.m.p, rms: Math.sqrt(sp / (2 * Math.max(1, nu))), rmsD: ns ? Math.sqrt(ss / ns) : 0, t, gsc: e.gsc, cost: e.c,
+    dtFrames: e.m.dt, use, nAus, nGenutzt: nu, dauer: tu.length ? tu[tu.length - 1] - tu[0] : 0, mitAL, mitAV, sig };
 }
 
 // Plausibilitaet der Zeitbasis aus dem Bild: Wie schnell entfernt sich der Ball laut Groessenabnahme?
@@ -1601,17 +1662,29 @@ async function runAnalysis(seed) {
   const tt = tiefeTempo(out.track, fit.t, f, d0, fpsReal);
   const th = fit.p[0] * 180 / Math.PI, ph = fit.p[1] * 180 / Math.PI;
   $('rDir').textContent = de(Math.abs(ph)) + '°';
-  $('rDirSub').textContent = Math.abs(ph) < 0.05 ? 'gerade' : (ph > 0 ? 'rechts' : 'links');
+  // Unsicherheit: Streuung aus der Anpassung plus feste Anteile (Kamerahoehe bzw. Horizont, Ausrichtung, Brennweite)
+  const horOK = !!(horNutz && !horNutz.fehler);
+  const uTh = Math.hypot(fit.sig.th || 0, horOK ? 0.4 : Math.atan(0.05 / Math.max(abstand, 0.5)) * 180 / Math.PI);
+  const uPh = Math.hypot(fit.sig.ph || 0, 0.3);
+  const uV = vF ? 0 : Math.hypot(fit.sig.v == null ? 0.3 : fit.sig.v / fit.p[2], 0.06, fit.mitAV ? 0 : 0.1);
+  const guete = fit.nGenutzt < 12 || fit.dauer < 0.06 || uV > 0.2 ? 'unsicher' : (!vF && (!fit.mitAV || uV > 0.1)) ? 'mittel' : 'gut';
+  $('rDirSub').textContent = (Math.abs(ph) < 0.05 ? 'gerade' : (ph > 0 ? 'rechts' : 'links')) + ` · ±${de(uPh)}°`;
   $('rLaunch').textContent = de(th) + '°';
+  $('rLaunchSub').textContent = `±${de(uTh)}°`;
   if (vF) { $('rSpeed').textContent = de(speed, 0); $('rSpeedSub').textContent = 'km/h, vorgegeben'; }
-  else { $('rSpeed').textContent = de(fit.p[2] * 3.6, 0); $('rSpeedSub').textContent = 'km/h, nur grob'; }
+  else { $('rSpeed').textContent = de(fit.p[2] * 3.6, 0); $('rSpeedSub').textContent = `km/h, ±${de(uV * 100, 0)} %`; }
 
   renderResult(out, fit, { f, cx, cy, al, B, vF, crop, d0, cx0, cy0 });
   const v0 = vF || fit.p[2], aL = fit.p.length > 3 ? fit.p[3] : 0;
   const aV = fit.p.length > 4 ? fit.p[4] : null;
   const fl = flug(fit.p[0], fit.p[1], v0, aL, aV);
   $('rCarry').textContent = de(fl.carry, 0);
-  $('rCarrySub').textContent = vF ? 'Schätzung' : 'grob, ohne Radar';
+  // Spanne des Carry: Speed und Abschuss um ihre Unsicherheit verschoben, Auftrieb um ein Viertel
+  const cs = [];
+  for (const dv of [-1, 1]) for (const dw of [-1, 1]) for (const dk of [0.75, 1.25])
+    cs.push(flug(fit.p[0] + dw * uTh * Math.PI / 180, fit.p[1], v0 * (1 + dv * uV), aL, aV * dk).carry);
+  const cLo = Math.min(...cs), cHi = Math.max(...cs);
+  $('rCarrySub').textContent = `${de(cLo, 0)}–${de(cHi, 0)} m`;
   $('rSide').textContent = de(Math.abs(fl.side), 0);
   $('rSideSub').textContent = Math.abs(fl.side) < 0.5 ? 'gerade' : (fl.side > 0 ? 'rechts' : 'links');
   $('rApex').textContent = de(fl.apex, 0);
@@ -1631,8 +1704,10 @@ async function runAnalysis(seed) {
     `STARTRICHTUNG: ${de(Math.abs(ph))} Grad ${ph > 0 ? 'rechts' : 'links'}`,
     `ABSCHUSSWINKEL: ${de(th)} Grad`,
     vF ? `Ballspeed vorgegeben: ${de(speed, 0)} km/h, Zeitversatz ${de(fit.p[2] * 1000)} ms` : `Ballspeed (nur grob aus Bild): ${de(fit.p[2] * 3.6, 0)} km/h`,
-    `Kurve (Seitenbeschleunigung): ${fit.p.length > 3 ? de(fit.p[3]) + ' m/s² ' + (fit.p[3] > 0 ? 'nach rechts' : 'nach links') : 'nicht geschaetzt (zu wenige Punkte)'}`,
-    `Auftrieb (Backspin): ${aV != null ? de(aV) + ' m/s² nach oben' : 'nicht geschaetzt (Spur zu kurz), Standardwert'}`,
+    `Kurve (Seitenbeschleunigung): ${fit.mitAL ? de(fit.p[3]) + ' m/s² ' + (fit.p[3] > 0 ? 'nach rechts' : 'nach links') : 'nicht geschaetzt (Spur zu kurz)'}`,
+    `Auftrieb (Backspin): ${de(aV)} m/s² nach oben${fit.mitAV ? '' : ' (nicht gemessen, ueblicher Wert fuer diesen Abschusswinkel)'}`,
+    `Guete: ${guete} – ${fit.nGenutzt} von ${out.track.length} Punkten gewertet (${fit.nAus} Ausreisser verworfen), Flugzeit in der Spur ${de(fit.dauer, 2)} s`,
+    `Unsicherheit: Abschuss ±${de(uTh)}°, Richtung ±${de(uPh)}°${vF ? '' : `, Speed ±${de(uV * 100, 0)} %`}, Carry ${de(cLo, 0)}–${de(cHi, 0)} m`,
     `Flug-Schaetzung: Carry ${de(fl.carry, 0)} m, seitlich ${de(Math.abs(fl.side), 1)} m ${fl.side > 0 ? 'rechts' : 'links'}, Scheitel ${de(fl.apex, 1)} m`,
     `Restfehler: ${de(fit.rms)} px (Position), ${de(fit.rmsD)} px (Ballgroesse), Groessenfaktor ${de(fit.gsc, 2)}, Zeitversatz ${de(fit.dtFrames || 0, 1)} Bilder, Zeitstempel ${zeitEcht ? 'echt' : 'berechnet'}${doppelt ? `, ${doppelt} doppelte Bilder entfernt` : ''}`,
     `Zeitbasis-Pruefung: ${tt ? `Ball entfernt sich laut Groessenabnahme um ${de(tt.proBild, 2)} m pro Bild (${de(tt.v * 3.6, 0)} km/h bei ${de(fpsReal, 0)} B/s; Zeitlupe bis ca. 0,35, Echtzeit ab ca. 0,7)` : 'nicht moeglich (Ball zu klein)'}`,
@@ -1652,7 +1727,8 @@ async function runAnalysis(seed) {
   else if (abIn > 0 && (hfovEff < 45 || hfovEff > 90)) status(`Achtung: Aus Abstand und Ballgröße ergibt sich ein Bildwinkel von ${de(hfovEff, 0)}° – unwahrscheinlich. Abstand nachmessen oder prüfen, ob der blaue Kreis genau um den Ball liegt.`, true);
   else if (neig < -50 || neig > 30) status(`Achtung: Kamera-Neigung ${de(neig)}° ist unwahrscheinlich. Höhe (Linse über Ballmitte, z. B. 0,2) und Abstand prüfen.`, true);
   else if (fit.gsc <= 0.71 || fit.gsc >= 1.49) status(`Achtung: Der Größenfaktor (${de(fit.gsc, 2)}) liegt an der Grenze. Ballgröße und Bahn passen nicht zusammen – Ballmarkierung, Abstand oder Zeitbasis prüfen. Speed und Carry nicht verwenden.`, true);
-  else status(`Fertig: ${out.track.length} Ballpositionen, Restfehler ${de(fit.rms)} px.`);
+  else if (guete === 'unsicher') status(`Messung unsicher: nur ${fit.nGenutzt} brauchbare Ballpositionen über ${de(fit.dauer, 2)} s Flug. Richtung und Abschuss sind grobe Werte, Speed und Carry nicht verwenden.`, true);
+  else status(`Fertig (Güte ${guete}): ${fit.nGenutzt} Ballpositionen gewertet${fit.nAus ? `, ${fit.nAus} Ausreißer verworfen` : ''}, Restfehler ${de(fit.rms)} px.`);
   lastTreff = out.treff;
   $('result').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
   makeAndSave({ out, fit, fl, f, cx, cy, al, B, fpsReal, vF, speed });
