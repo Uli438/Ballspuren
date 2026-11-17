@@ -1,5 +1,5 @@
 // Birdino Ballspur – Service Worker: App offline verfügbar machen
-const VERSION = 'ballspur-v1';
+const VERSION = 'ballspur-v11';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './mp4-muxer.js', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
