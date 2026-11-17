@@ -886,6 +886,67 @@ function tiefeTempo(track, t, f, d0, fps) {
   const v = sl[sl.length >> 1];
   return { v, proBild: v / fps, n: P.length - 1 };
 }
+// Wo wechselt das Video zwischen Zeitlupe und Echtzeit? (iOS-Zeitlupen sind nur im mittleren Teil verlangsamt.)
+// Der Ball verraet es: Entfernt er sich von der Kamera, schrumpft sein Schritt im Bild wie das Quadrat seiner
+// Groesse. Schritt / Groesse² ist deshalb pro Bild fast konstant - springt er auf das Vielfache, ist ab dort
+// mehr Zeit pro Bild vergangen. Absolut entscheidet die Tiefe: ueber ca. 0,5 m pro Bild kann keine Zeitlupe sein.
+// Rueckgabe: Zeit je Punkt (ab Treffmoment), Faktor je Punkt (1 = Zeitlupe, R = Echtzeit) und die Wechselstellen.
+function zeitStufen(track, treff, fpsReal, fpsDatei, f, d0, start) {
+  const R = fpsReal / fpsDatei, n = track.length;
+  if (!(R > 1.5) || n < 4) return null;
+  const med = a => { a = a.slice().sort((u, v) => u - v); return a.length ? a[a.length >> 1] : null; };
+  // Stuetzpunkte: Ruhestelle + Spur; Intervall k liegt zwischen Punkt k-1 und k (k = 0: Ruhestelle -> erster Punkt)
+  // Fehlpunkte (viel kleiner als die folgenden) nicht fuer die Pruefung verwenden
+  const brauchbar = track.filter((p, k) => { const nx = track.slice(k + 1, k + 4).map(u => u.d); return !(nx.length >= 2 && p.d < 0.35 * med(nx)); });
+  const P = [{ f: treff, x: start[0], y: start[1], d: d0 }, ...brauchbar], q = [], tief = [], gross = [];
+  for (let k = 1; k < P.length; k++) {
+    const a = P[k - 1], b = P[k], df = Math.max(0.5, b.f - a.f), s = Math.hypot(b.x - a.x, b.y - a.y) / df;
+    q.push(s > 0.4 && Math.min(a.d, b.d) >= 2.5 ? s / (a.d * b.d) : null);
+    gross.push(k > 1 && a.d >= 8 && b.d >= 6);   // nicht das Intervall ab der Ruhestelle: deren Groesse ist anders gemessen
+    tief.push(a.d >= 4 && b.d >= 4 ? (f * BALL_D / b.d - f * BALL_D / a.d) / df : null);
+  }
+  // sichere Zeitlupen-Intervalle (Tiefe unter 0,4 m pro Bild) liefern den Bezugswert
+  // Die Tiefe ist nur bei grossem Ball genau: gibt es solche Intervalle, entscheiden allein sie
+  const nurGross = gross.some((g, k) => g && q[k] != null && tief[k] != null), gilt = k => q[k] != null && tief[k] != null && (!nurGross || gross[k]);
+  const ref = med(q.filter((v, k) => gilt(k) && tief[k] < 0.4 && tief[k] > 0.02));
+  const echtRef = med(q.filter((v, k) => gilt(k) && tief[k] > 0.6));
+  const bezug = ref != null ? ref : (echtRef != null ? echtRef / R : null);
+  if (bezug == null) return null;
+  // Faktor je Intervall, geglaettet ueber 5 Intervalle
+  const roh = q.map((v, k) => v == null ? null : Math.min(R, Math.max(1, v / bezug)));
+  const fak = roh.map((v, k) => { const w = []; for (let j = Math.max(0, k - 2); j <= Math.min(roh.length - 1, k + 2); j++) if (roh[j] != null) w.push(roh[j]); return w.length ? med(w) : null; });
+  for (let k = 0; k < fak.length; k++) if (fak[k] == null) fak[k] = k ? fak[k - 1] : 1;
+  for (let k = fak.length - 2; k >= 0; k--) if (fak[k] == null) fak[k] = fak[k + 1];
+  // klar Zeitlupe -> genau 1, klar Echtzeit -> genau R, dazwischen Rampe (gemessener Wert)
+  const stufe = fak.map(v => v < 1.8 ? 1 : v > R / 1.8 ? R : v);
+  // Ein Wechsel zaehlt nur, wenn er mindestens 3 Intervalle anhaelt (sonst ist es Messrauschen am kleinen Ball)
+  const art = v => v === 1 ? 0 : v === R ? 2 : 1;
+  for (let k = 0; k < stufe.length;) { let j = k; while (j < stufe.length && art(stufe[j]) === art(stufe[k])) j++;
+    if (j - k < 3 && (k > 0 || j < stufe.length)) { const ers = k > 0 ? stufe[k - 1] : stufe[j]; for (let i = k; i < j; i++) stufe[i] = ers; }
+    k = j; }
+  // Eine Rampe gibt es nur neben einem Echtzeit-Abschnitt; steht sie allein, ist es Rauschen -> Zeitlupe
+  for (let k = 0; k < stufe.length;) { let j = k; while (j < stufe.length && art(stufe[j]) === art(stufe[k])) j++;
+    if (art(stufe[k]) === 1 && !((k > 0 && stufe[k - 1] === R) || (j < stufe.length && stufe[j] === R))) for (let i = k; i < j; i++) stufe[i] = 1;
+    k = j; }
+  // Sonderfall Abschlag ausserhalb der Zeitlupe: Von der Ruhestelle bis zum ersten gut messbaren Punkt legt der Ball
+  // in Zeitlupe hoechstens ca. 0,35 m pro Bild zurueck. Sind es deutlich mehr, lief dieses Stueck schneller.
+  if (stufe[0] === 1 && P.length > 1 && P[1].d >= 6 && d0 >= 6) {
+    const weg = (f * BALL_D / P[1].d - f * BALL_D / d0) / (P[1].f - treff + 0.5);
+    if (weg > 0.8) { const v = Math.min(R, weg / 0.3); stufe[0] = v > R / 1.8 ? R : v; }
+  }
+  // Zeit an den Stuetzpunkten, dann fuer jeden Spurpunkt (auch die nicht verwendeten) aus seinem Intervall
+  const tP = [0]; let zeit = 0, f0 = treff - 0.5;
+  for (let k = 1; k < P.length; k++) { zeit += (P[k].f - f0) * stufe[k - 1] / fpsReal; f0 = P[k].f; tP.push(zeit); }
+  const t = [], faktor = [];
+  for (const p of track) { let j = 1; while (j < P.length - 1 && P[j].f < p.f) j++;
+    const fa = j === 1 ? treff - 0.5 : P[j - 1].f, ta = j === 1 ? 0 : tP[j - 1];
+    t.push(Math.max(1e-4, ta + (p.f - fa) * stufe[j - 1] / fpsReal)); faktor.push(stufe[j - 1]); }
+  const wechsel = [];
+  for (let k = 1; k < stufe.length; k++) { const a = stufe[k - 1] === 1 ? 'Zeitlupe' : stufe[k - 1] === R ? 'Echtzeit' : 'Rampe', b = stufe[k] === 1 ? 'Zeitlupe' : stufe[k] === R ? 'Echtzeit' : 'Rampe';
+    if (a !== b) wechsel.push({ bild: P[k].f, von: a, nach: b }); }
+  const beginn = stufe[0] === 1 ? 'Zeitlupe' : stufe[0] === R ? 'Echtzeit' : 'Rampe';
+  return { t, faktor, wechsel, beginn, gemischt: stufe.some(v => v !== 1) };
+}
 // ===== CORE END =====
 
 // ===== Oberflaeche =====
@@ -1657,6 +1718,10 @@ async function runAnalysis(seed) {
       // Fallen sehr viele Punkte weg, stimmen eher die Zeitstempel nicht als das Video
       if (ded.length >= 4 && doppelt <= 0.25 * out.track.length) { out.track = ded; zeitEcht = true; } else doppelt = 0;
     } }
+  // Wechselt das Video innerhalb der Spur zwischen Zeitlupe und Echtzeit? Dann die Zeiten je Bild anpassen.
+  const zs = zeitStufen(out.track, out.treff, fpsReal, num('fpsDatei') || 30, f, d0, [cx0, cy0]);
+  const zsText = !zs ? 'nicht pruefbar' : !zs.gemischt ? 'durchgehend Zeitlupe' : `Beginn in ${zs.beginn}` + (zs.wechsel.length ? ', ' + zs.wechsel.map(w => `ab Bild ${w.bild} ${w.nach}`).join(', ') : ' (ganze Spur)');
+  if (zs && zs.gemischt) out.track = out.track.map((p, k) => ({ ...p, t: zs.t[k] }));
   const fit = anpassen(out.track, out.treff, fpsReal, f, cx, cy, al, B, vF);
   const rueck = rueckOf(out, cx0, cy0);
   const tt = tiefeTempo(out.track, fit.t, f, d0, fpsReal);
@@ -1710,6 +1775,7 @@ async function runAnalysis(seed) {
     `Unsicherheit: Abschuss ±${de(uTh)}°, Richtung ±${de(uPh)}°${vF ? '' : `, Speed ±${de(uV * 100, 0)} %`}, Carry ${de(cLo, 0)}–${de(cHi, 0)} m`,
     `Flug-Schaetzung: Carry ${de(fl.carry, 0)} m, seitlich ${de(Math.abs(fl.side), 1)} m ${fl.side > 0 ? 'rechts' : 'links'}, Scheitel ${de(fl.apex, 1)} m`,
     `Restfehler: ${de(fit.rms)} px (Position), ${de(fit.rmsD)} px (Ballgroesse), Groessenfaktor ${de(fit.gsc, 2)}, Zeitversatz ${de(fit.dtFrames || 0, 1)} Bilder, Zeitstempel ${zeitEcht ? 'echt' : 'berechnet'}${doppelt ? `, ${doppelt} doppelte Bilder entfernt` : ''}`,
+    `Zeitlupe/Echtzeit in der Spur: ${zsText}${zs && zs.gemischt ? ' – Zeiten je Bild angepasst' : ''}`,
     `Zeitbasis-Pruefung: ${tt ? `Ball entfernt sich laut Groessenabnahme um ${de(tt.proBild, 2)} m pro Bild (${de(tt.v * 3.6, 0)} km/h bei ${de(fpsReal, 0)} B/s; Zeitlupe bis ca. 0,35, Echtzeit ab ca. 0,7)` : 'nicht moeglich (Ball zu klein)'}`,
     `Spur zurueckverlaengert zum Treffmoment: ${Math.round(rueck)} px neben dem markierten Ball (${de(rueck / d0, 1)} Balldurchmesser)`,
     'Punkte (Bild, ms, x, y, Durchmesser px):',
@@ -1721,12 +1787,13 @@ async function runAnalysis(seed) {
   const neig = al * 180 / Math.PI;
   const vFit = (vF || fit.p[2]) * 3.6;
   const fDat = num('fpsDatei') || 30;
-  if (tt && tt.proBild > 0.5) status(`Achtung: Die Zeitbasis passt nicht. Der Ball entfernt sich um ${de(tt.proBild, 1)} m pro Bild – bei ${de(fpsReal, 0)} B/s wären das ${de(tt.v * 3.6, 0)} km/h, bei ${de(fDat, 0)} B/s ${de(tt.v * 3.6 * fDat / fpsReal, 0)} km/h. Der Treffer liegt sehr wahrscheinlich nicht im verlangsamten Teil der Zeitlupe. In der Fotos-App unter „Bearbeiten“ den Zeitlupenbereich über das ganze Video ziehen und neu laden. Werte nicht verwenden.`, true);
+  if (tt && tt.proBild > 0.5 && !(zs && zs.gemischt)) status(`Achtung: Die Zeitbasis passt nicht. Der Ball entfernt sich um ${de(tt.proBild, 1)} m pro Bild – bei ${de(fpsReal, 0)} B/s wären das ${de(tt.v * 3.6, 0)} km/h, bei ${de(fDat, 0)} B/s ${de(tt.v * 3.6 * fDat / fpsReal, 0)} km/h. Der Treffer liegt sehr wahrscheinlich nicht im verlangsamten Teil der Zeitlupe. In der Fotos-App unter „Bearbeiten“ den Zeitlupenbereich über das ganze Video ziehen und neu laden. Werte nicht verwenden.`, true);
   else if (!vF && (vFit > 320 || vFit < 40)) status(`Achtung: Die Ballspeed (${de(vFit, 0)} km/h) ist unrealistisch. Meist liegt der Treffer nicht im verlangsamten Teil der Zeitlupe (in der Fotos-App den Zeitlupenbereich über das ganze Video ziehen) oder die Bildrate stimmt nicht. Werte nicht verwenden.`, true);
   else if (rueck > 2 * d0) status(`Achtung: Die Spur führt nicht zum markierten Ball zurück (${de(rueck / d0, 1)} Balldurchmesser daneben). Entweder ist ein anderer Ball markiert oder die Spur folgt etwas anderem. Werte nicht verwenden.`, true);
   else if (abIn > 0 && (hfovEff < 45 || hfovEff > 90)) status(`Achtung: Aus Abstand und Ballgröße ergibt sich ein Bildwinkel von ${de(hfovEff, 0)}° – unwahrscheinlich. Abstand nachmessen oder prüfen, ob der blaue Kreis genau um den Ball liegt.`, true);
   else if (neig < -50 || neig > 30) status(`Achtung: Kamera-Neigung ${de(neig)}° ist unwahrscheinlich. Höhe (Linse über Ballmitte, z. B. 0,2) und Abstand prüfen.`, true);
   else if (fit.gsc <= 0.71 || fit.gsc >= 1.49) status(`Achtung: Der Größenfaktor (${de(fit.gsc, 2)}) liegt an der Grenze. Ballgröße und Bahn passen nicht zusammen – Ballmarkierung, Abstand oder Zeitbasis prüfen. Speed und Carry nicht verwenden.`, true);
+  else if (zs && zs.gemischt) status(`Das Video läuft in der Ballspur nicht durchgehend in Zeitlupe: ${zsText}. Die Zeiten sind je Bild angepasst (Güte ${guete}). Sicherer ist es, in der Fotos-App den Zeitlupenbereich über das ganze Video zu ziehen.`, guete === 'unsicher');
   else if (guete === 'unsicher') status(`Messung unsicher: nur ${fit.nGenutzt} brauchbare Ballpositionen über ${de(fit.dauer, 2)} s Flug. Richtung und Abschuss sind grobe Werte, Speed und Carry nicht verwenden.`, true);
   else status(`Fertig (Güte ${guete}): ${fit.nGenutzt} Ballpositionen gewertet${fit.nAus ? `, ${fit.nAus} Ausreißer verworfen` : ''}, Restfehler ${de(fit.rms)} px.`);
   lastTreff = out.treff;
